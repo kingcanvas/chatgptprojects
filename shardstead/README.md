@@ -2,6 +2,12 @@
 
 Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. This repository currently contains **First Light**, the first playable prototype.
 
+## Play now
+
+Open the current web build: **[Play Shardstead — First Light](https://shardstead-game.codexonsteroids.chatgpt.site)**
+
+The same link works on desktop and mobile. Progress is saved locally in that browser.
+
 ## Playable now
 
 - Procedurally generated voxel frontier with terrain, trees, shoreline, ore, and ruins
