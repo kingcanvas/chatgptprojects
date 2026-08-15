@@ -1,34 +1,43 @@
 # Shardstead
 
-Shardstead is a planned endless 3D sandbox game focused on building, exploration, progression, and player freedom. The world will grow procedurally as players travel, letting them build settlements, discover new regions, collect resources, and upgrade their World Core without a fixed ending.
+Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. This repository currently contains **First Light**, the first playable prototype.
+
+## Playable now
+
+- Procedurally generated voxel frontier with terrain, trees, shoreline, ore, and ruins
+- A glowing World Core landmark and first shard-recovery objective
+- Mine blocks, collect rift shards, select materials, and place new blocks
+- Desktop controls: WASD, mouse look, Space, Shift, number keys, left/right click, and F5/F camera cycling
+- Mobile controls: virtual movement stick, drag-to-look, mine, build, jump, and camera buttons
+- First-person, third-person, and front-facing camera modes
+- Low, Balanced, and High graphics presets plus adjustable view distance
+- Device-local world and player saving
+- Original hand-painted textures generated specifically for Shardstead
+
+## Run locally
+
+Requires Node.js 22.13 or newer.
+
+```bash
+npm install
+npm run dev
+```
+
+For a production check:
+
+```bash
+npm run build
+npm run lint
+```
 
 ## Project status
 
-Shardstead is currently in the planning stage. This folder contains the approved concept and development roadmap; no playable game code has been added yet.
+First Light is a foundation milestone, not the finished game. The larger design, technical roadmap, content plan, PC/mobile targets, optimization tiers, and production phases are documented in [PLANS.md](./PLANS.md).
 
-## Core pillars
+## Original assets
 
-- **Build freely:** Place, remove, and combine world pieces to create anything from a small shelter to a large settlement.
-- **Explore forever:** Stream procedurally generated 3D terrain, caves, biomes, ruins, and land shards as the player travels.
-- **Keep progressing:** Upgrade tools, storage, movement abilities, crafting systems, and the World Core.
-- **Choose your own path:** Play as a builder, explorer, engineer, farmer, fighter, or a mixture of roles.
-- **Play anywhere:** Support desktop keyboard and mouse controls plus mobile touch controls and responsive interfaces.
+The production textures in `public/textures/` were created for this project and are not copied from Minecraft or another game. Generation details are recorded in [ASSET_PROVENANCE.md](./ASSET_PROVENANCE.md).
 
-## Planned platform support
+## License
 
-| Platform | Primary input | Camera controls |
-| --- | --- | --- |
-| PC | Keyboard and mouse | Mouse look; F5 switches between first- and third-person views |
-| Mobile | Touchscreen | Virtual controls, swipe-to-look, and an on-screen camera switch |
-
-## Graphics and performance
-
-Shardstead will include Auto, Low, Medium, and High graphics presets. Players will also be able to adjust settings such as render distance, resolution scale, shadows, particles, field of view, and frame-rate limit.
-
-## Original content policy
-
-The game's models, textures, interface graphics, icons, and other visual content will be created specifically for Shardstead. Procedural and code-generated geometry will be used where it improves world variety and performance. Third-party game assets will not be copied into the project.
-
-## Planning
-
-See [PLANS.md](PLANS.md) for the current game design, technical goals, development phases, and decisions that still need to be made.
+No open-source license has been granted yet. Copyright remains with the repository owner unless a license is added later.
