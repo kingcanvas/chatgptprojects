@@ -1,6 +1,6 @@
 # Shardstead
 
-Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Tideborn (Build 004)**.
+Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Hardwon (Build 005)**.
 
 ## Play now
 
@@ -21,6 +21,10 @@ The same link works on desktop and mobile. Progress is saved locally in that bro
 - Swimming physics with drag, gentle sinking, and Jump-to-rise controls
 - Cinematic rendering with PBR materials, ACES color, soft shadows, stronger waves, and bloom
 - Creative flight, placement validity previews, and rotating local save backups
+- Survival worlds now begin with an empty inventory and require gathering every block
+- A 27-slot inventory, nine-slot hotbar, equipment area, and mobile inventory control
+- Persistent health and food meters with fall damage, creature contact damage, hunger, regeneration, and Mossback food recovery
+- Hold-to-break mining with material hardness, block crack feedback, and a center progress ring; Creative remains instant
 - Meadows, forests, highlands, shores, rift regions, ruins, watchtowers, and rift arches
 - A glowing World Core landmark and first shard-recovery objective
 - Mine blocks, collect rift shards, select materials, and place new blocks

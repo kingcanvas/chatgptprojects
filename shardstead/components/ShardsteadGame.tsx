@@ -26,6 +26,7 @@ type WorldMeta = { id: string; name: string; mode: GameMode; createdAt: number; 
 type Inventory = Partial<Record<BlockType, number>>;
 type GameActions = {
   mine: () => void;
+  mineStop: () => void;
   place: () => void;
   jump: () => void;
   camera: () => void;
@@ -57,13 +58,24 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   dark: "Rift rock",
   core: "World Core",
 };
-const HOTBAR: { type: BlockType; texture: string }[] = [
+const INVENTORY_ITEMS: { type: BlockType; texture: string }[] = [
   { type: "grass", texture: "/textures/grass-top.png" },
+  { type: "soil", texture: "/textures/soil.png" },
   { type: "stone", texture: "/textures/stone.png" },
+  { type: "sand", texture: "/textures/sand.png" },
   { type: "wood", texture: "/textures/wood-rings.png" },
+  { type: "bark", texture: "/textures/bark.png" },
+  { type: "leaves", texture: "/textures/leaves.png" },
   { type: "crystal", texture: "/textures/rift-crystal.png" },
   { type: "metal", texture: "/textures/core-metal.png" },
+  { type: "rune", texture: "/textures/rune-stone.png" },
+  { type: "snow", texture: "/textures/snow.png" },
+  { type: "copper", texture: "/textures/copper-ore.png" },
+  { type: "dark", texture: "/textures/dark-rock.png" },
 ];
+const HOTBAR = INVENTORY_ITEMS.slice(0, 9);
+const STARTER_BLOCKS: Inventory = { grass: 24, stone: 18, wood: 12, crystal: 3, metal: 6 };
+const HARDNESS: Record<BlockType, number> = { grass: .42, soil: .48, stone: 1.35, sand: .36, bark: .82, wood: .72, leaves: .28, crystal: 1.7, metal: 2.1, rune: 1.65, snow: .3, copper: 1.8, dark: 1.5, core: 999 };
 
 function isTouchDevice() {
   return typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
@@ -102,6 +114,7 @@ export default function ShardsteadGame() {
   const coordsRef = useRef<HTMLSpanElement>(null);
   const actionsRef = useRef<GameActions>({
     mine: () => undefined,
+    mineStop: () => undefined,
     place: () => undefined,
     jump: () => undefined,
     camera: () => undefined,
@@ -123,6 +136,11 @@ export default function ShardsteadGame() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [inventory, setInventory] = useState<Inventory>({});
+  const [health, setHealth] = useState(20);
+  const [food, setFood] = useState(20);
+  const [breakProgress, setBreakProgress] = useState(0);
+  const healthRef = useRef(20);
+  const foodRef = useRef(20);
   const [, setShards] = useState(0);
   const [, setMessage] = useState("Find the glowing World Core");
   const [mobile] = useState(() => isTouchDevice());
@@ -234,7 +252,9 @@ export default function ShardsteadGame() {
     let restoredPosition: [number, number, number] | null = null;
     let restoredYaw = 0;
     let restoredShards = 0;
-    inventoryRef.current = activeWorld.mode === "creative" ? {} : { grass: 24, stone: 18, wood: 12, crystal: 3, metal: 6 };
+    inventoryRef.current = {};
+    healthRef.current = 20;
+    foodRef.current = 20;
     try {
       const primaryKey = saveKey(activeWorld.id);
       const primary = window.localStorage.getItem(primaryKey);
@@ -250,18 +270,30 @@ export default function ShardsteadGame() {
           yaw?: number;
           shards?: number;
           inventory?: Inventory;
+          health?: number;
+          food?: number;
+          starterRemoved?: boolean;
         };
         if (Array.isArray(save.edits)) for (const [key, value] of save.edits) edits.set(key, value);
         if (Array.isArray(save.position) && save.position.length === 3) restoredPosition = save.position;
         if (typeof save.yaw === "number") restoredYaw = save.yaw;
         if (typeof save.shards === "number") restoredShards = save.shards;
-        inventoryRef.current = save.inventory ?? { grass: 24, stone: 18, wood: 12, crystal: 3, metal: 6 };
+        inventoryRef.current = save.inventory ?? {};
+        if (activeWorld.mode === "survival" && !save.starterRemoved) {
+          for (const [type, amount] of Object.entries(STARTER_BLOCKS) as [BlockType, number][]) {
+            inventoryRef.current[type] = Math.max(0, (inventoryRef.current[type] ?? 0) - amount);
+          }
+        }
+        healthRef.current = THREE.MathUtils.clamp(save.health ?? 20, 0, 20);
+        foodRef.current = THREE.MathUtils.clamp(save.food ?? 20, 0, 20);
       }
     } catch {
       window.localStorage.removeItem(saveKey(activeWorld.id));
     }
     setShards(restoredShards);
     setInventory({ ...inventoryRef.current });
+    setHealth(healthRef.current);
+    setFood(foodRef.current);
 
     const player = {
       position: new THREE.Vector3(...(restoredPosition ?? [0, terrainHeight(0, 9) + 0.52, 9])),
@@ -290,6 +322,9 @@ export default function ShardsteadGame() {
     placementPreview.visible = false;
     placementPreview.renderOrder = 20;
     scene.add(placementPreview);
+    const breakMaterial = new THREE.MeshBasicMaterial({ color: 0xe9f6ed, transparent: true, opacity: 0, wireframe: true, depthTest: false });
+    const breakOverlay = new THREE.Mesh(new THREE.BoxGeometry(1.06, 1.06, 1.06, 3, 3, 3), breakMaterial);
+    breakOverlay.visible = false; breakOverlay.renderOrder = 21; scene.add(breakOverlay);
     const oceanMeshes = new Map<string, THREE.Mesh>();
     const waterMaterial = new THREE.ShaderMaterial({
       uniforms: { uMap: { value: textures.water }, uTime: { value: 0 }, uWaveStrength: { value: 0.12 }, uOpacity: { value: 0.78 } },
@@ -394,6 +429,25 @@ export default function ShardsteadGame() {
     const PLAYER_HEIGHT = 1.82;
     let swingUntil = 0;
     let playerInWater = false;
+    let miningActive = false;
+    let miningTarget = "";
+    let miningAmount = 0;
+    let miningStage = 0;
+    let hungerTimer = 0;
+    let recoveryTimer = 0;
+    let creatureDamageCooldown = 0;
+
+    const updateVitals = () => { setHealth(healthRef.current); setFood(foodRef.current); };
+    const damagePlayer = (amount: number) => {
+      if (activeWorld.mode !== "survival" || amount <= 0) return;
+      healthRef.current = Math.max(0, healthRef.current - amount);
+      if (healthRef.current === 0) {
+        player.position.set(0, terrainHeight(0, 9) + 0.52, 9);
+        player.velocity.set(0, 0, 0); healthRef.current = 20; foodRef.current = Math.max(8, foodRef.current);
+        setMessage("You were returned to the World Core");
+      }
+      updateVitals();
+    };
 
     const isSolid = (type: BlockType | undefined) => Boolean(type);
     const collidesAt = (position: THREE.Vector3) => {
@@ -443,6 +497,9 @@ export default function ShardsteadGame() {
           yaw: player.yaw,
           shards: restoredShards,
           inventory: inventoryRef.current,
+          health: healthRef.current,
+          food: foodRef.current,
+          starterRemoved: true,
         }));
       } catch {
         setMessage("Local save is full — keep exploring for now");
@@ -481,6 +538,7 @@ export default function ShardsteadGame() {
           creatures.delete(key);
           restoredShards += 1;
           setShards(restoredShards);
+          if (activeWorld.mode === "survival") { foodRef.current = Math.min(20, foodRef.current + 4); updateVitals(); }
           setMessage("Mossback released a wild shard");
         } else {
           creature.heading += Math.PI;
@@ -556,7 +614,16 @@ export default function ShardsteadGame() {
       rebuildMeshes();
       saveWorld();
     };
-    actionsRef.current = { mine: () => interact(false), place: () => interact(true), jump, camera: updateCameraMode, look };
+    const stopMining = () => {
+      miningActive = false; miningTarget = ""; miningAmount = 0; miningStage = 0;
+      breakOverlay.visible = false; setBreakProgress(0);
+    };
+    const startMining = () => {
+      if (pausedRef.current) return;
+      if (activeWorld.mode === "creative") interact(false);
+      else miningActive = true;
+    };
+    actionsRef.current = { mine: startMining, mineStop: stopMining, place: () => interact(true), jump, camera: updateCameraMode, look };
 
     applyGraphicsRef.current = () => {
       const preset = qualityRef.current;
@@ -626,16 +693,17 @@ export default function ShardsteadGame() {
         setPaused(false);
         return;
       }
-      if (event.button === 0) interact(false);
+      if (event.button === 0) startMining();
       if (event.button === 2) interact(true);
     };
+    const onMouseUp = (event: MouseEvent) => { if (event.button === 0) stopMining(); };
     const onContextMenu = (event: MouseEvent) => event.preventDefault();
     const onPointerLockChange = () => {
       const isLocked = document.pointerLockElement === canvas;
       setLocked(isLocked);
-      if (!isLocked && !isTouchDevice()) setPaused(true);
+      if (!isLocked && !isTouchDevice()) { stopMining(); setPaused(true); }
     };
-    const onVisibility = () => { if (document.hidden) saveWorld(); };
+    const onVisibility = () => { if (document.hidden) { stopMining(); saveWorld(); } };
 
     window.addEventListener("resize", resize);
     window.addEventListener("orientationchange", orientationChange);
@@ -648,6 +716,7 @@ export default function ShardsteadGame() {
     document.addEventListener("visibilitychange", onVisibility);
     document.addEventListener("touchmove", preventTouchPageMove, { passive: false });
     canvas.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("contextmenu", onContextMenu);
     applySize();
 
@@ -703,9 +772,11 @@ export default function ShardsteadGame() {
         } else {
           const floor = floorBelow(player.position);
           if (Number.isFinite(floor) && nextY.y <= floor + 0.01 && oldY >= floor - 0.12) {
+            const impactSpeed = -player.velocity.y;
             player.position.y = floor + 0.01;
             player.velocity.y = 0;
             player.onGround = true;
+            if (impactSpeed > 10.5) damagePlayer(Math.min(10, Math.floor((impactSpeed - 8.5) / 2)));
           } else if (!collidesAt(nextY)) {
             player.position.y = nextY.y;
             player.onGround = false;
@@ -717,6 +788,16 @@ export default function ShardsteadGame() {
           player.position.set(0, terrainHeight(0, 9) + 0.52, 9);
           player.velocity.set(0, 0, 0);
           setMessage("The World Core pulled you back from the void");
+        }
+        if (activeWorld.mode === "survival") {
+          if (isMoving) hungerTimer += dt;
+          recoveryTimer += dt;
+          if (hungerTimer > 35) { hungerTimer = 0; foodRef.current = Math.max(0, foodRef.current - 1); updateVitals(); }
+          if (recoveryTimer > 4) {
+            recoveryTimer = 0;
+            if (foodRef.current >= 18 && healthRef.current < 20) { healthRef.current = Math.min(20, healthRef.current + 1); foodRef.current -= 1; updateVitals(); }
+            else if (foodRef.current === 0) damagePlayer(1);
+          }
         }
       }
 
@@ -736,6 +817,9 @@ export default function ShardsteadGame() {
         creature.root.position.z += Math.cos(creature.heading) * speed;
         creature.root.position.y = terrainHeight(Math.round(creature.root.position.x), Math.round(creature.root.position.z)) + 0.52 + Math.sin(elapsed * 5 + creature.phase) * 0.025;
         creature.root.rotation.y = creature.heading;
+        if (activeWorld.mode === "survival" && elapsed > creatureDamageCooldown && creature.root.position.distanceTo(player.position) < 1.05) {
+          creatureDamageCooldown = elapsed + 1.4; damagePlayer(1); creature.heading += Math.PI;
+        }
       }
 
       playerRig.root.visible = player.mode !== "first";
@@ -769,6 +853,37 @@ export default function ShardsteadGame() {
         camera.position.lerp(target, 0.2);
         camera.lookAt(eye);
       }
+
+      if (miningActive && activeWorld.mode === "survival" && !pausedRef.current) {
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const creatureHit = raycaster.intersectObject(creatureGroup, true)[0];
+        const blockHit = raycaster.intersectObjects(worldMeshes, false)[0];
+        let targetKey = "";
+        let required = .55;
+        let targetBlock: BlockCoord | null = null;
+        if (creatureHit && creatureHit.distance <= 4.8) {
+          targetKey = `creature:${String(creatureHit.object.userData.creatureId ?? "")}`;
+        } else if (blockHit && blockHit.instanceId !== undefined && blockHit.instanceId !== null) {
+          targetBlock = (blockHit.object.userData.blocks as BlockCoord[])[blockHit.instanceId];
+          targetKey = blockKey(targetBlock.x, targetBlock.y, targetBlock.z);
+          required = HARDNESS[targetBlock.type];
+        }
+        if (!targetKey || required > 100) stopMining();
+        else {
+          if (targetKey !== miningTarget) { miningTarget = targetKey; miningAmount = 0; miningStage = 0; }
+          miningAmount = Math.min(1, miningAmount + dt / required);
+          const nextStage = Math.max(1, Math.ceil(miningAmount * 10));
+          if (nextStage !== miningStage) { miningStage = nextStage; setBreakProgress(miningAmount); }
+          swingUntil = elapsed + .12;
+          if (targetBlock) {
+            breakOverlay.position.set(targetBlock.x, targetBlock.y, targetBlock.z);
+            breakMaterial.opacity = .16 + miningAmount * .68;
+            breakMaterial.color.setHSL(.47, .58, .76 - miningAmount * .28);
+            breakOverlay.visible = true;
+          } else breakOverlay.visible = false;
+          if (miningAmount >= 1) { interact(false); miningTarget = ""; miningAmount = 0; miningStage = 0; setBreakProgress(0); breakOverlay.visible = false; }
+        }
+      } else if (!miningActive) breakOverlay.visible = false;
 
       placementPreview.visible = false;
       if (!pausedRef.current) {
@@ -831,6 +946,7 @@ export default function ShardsteadGame() {
       document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("touchmove", preventTouchPageMove);
       canvas.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("contextmenu", onContextMenu);
       renderer.dispose();
       composer.dispose();
@@ -838,6 +954,8 @@ export default function ShardsteadGame() {
       cubeGeometry.dispose();
       placementPreview.geometry.dispose();
       placementMaterial.dispose();
+      breakOverlay.geometry.dispose();
+      breakMaterial.dispose();
       Object.values(textures).forEach((texture) => texture.dispose());
       mount.removeChild(canvas);
       canvasRef.current = null;
@@ -850,8 +968,10 @@ export default function ShardsteadGame() {
   };
   const pressAction = (event: React.PointerEvent<HTMLButtonElement>, action: keyof Pick<GameActions, "mine" | "place" | "jump" | "camera">) => {
     stopTouch(event);
+    if (action === "mine") event.currentTarget.setPointerCapture(event.pointerId);
     actionsRef.current[action]();
   };
+  const releaseMine = (event: React.PointerEvent<HTMLButtonElement>) => { stopTouch(event); actionsRef.current.mineStop(); };
   const handleLookStart = (event: React.PointerEvent<HTMLDivElement>) => {
     stopTouch(event);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -898,7 +1018,7 @@ export default function ShardsteadGame() {
   if (!activeWorld) return (
     <main className="home-screen">
       <section className="home-panel">
-        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 004 · TIDEBORN</p><h1>SHARDSTEAD</h1>
+        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 005 · HARDWON</p><h1>SHARDSTEAD</h1>
         <p className="tagline">Choose a world. Keep every frontier.</p>
         {creating ? <div className="world-creator">
           <label>World name<input value={newWorldName} maxLength={30} onChange={(e) => setNewWorldName(e.target.value)} /></label>
@@ -930,6 +1050,9 @@ export default function ShardsteadGame() {
       </header>
       <div className="camera-chip">{CAMERA_LABELS[cameraMode]} · {mobile ? "CAM" : "F5"}</div>
       <div className="crosshair" aria-hidden="true"><i /><i /></div>
+      {breakProgress > 0 && <div className="break-progress" style={{ "--break": `${Math.round(breakProgress * 360)}deg` } as React.CSSProperties} aria-label={`Breaking ${Math.round(breakProgress * 100)} percent`} />}
+      {activeWorld.mode === "survival" && <div className="survival-hud" aria-label={`Health ${health} of 20, food ${food} of 20`}><div className="vital-row health-row">{Array.from({ length: 10 }, (_, index) => <i key={index} className={health > index * 2 ? "filled" : ""}>♥</i>)}</div><div className="vital-row food-row">{Array.from({ length: 10 }, (_, index) => <i key={index} className={food > index * 2 ? "filled" : ""}>◆</i>)}</div></div>}
+      <button type="button" className="inventory-toggle" onPointerDown={(event) => { stopTouch(event); setInventoryOpen(true); setPaused(true); }} aria-label="Open inventory">•••</button>
       <nav className="hotbar" aria-label="Building materials">
         {HOTBAR.map((item, index) => (
           <button
@@ -941,8 +1064,8 @@ export default function ShardsteadGame() {
             aria-pressed={selected === item.type}
           >
             <span className="slot-number">{index + 1}</span>
-            <ItemCube texture={item.texture} />
-            <span className="item-count">{activeWorld.mode === "creative" ? "∞" : inventory[item.type] ?? 0}</span>
+            {(activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0) && <ItemCube texture={item.texture} />}
+            {(activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0) && <span className="item-count">{activeWorld.mode === "creative" ? "∞" : inventory[item.type] ?? 0}</span>}
             <span className="slot-label">{BLOCK_LABELS[item.type]}</span>
           </button>
         ))}
@@ -953,17 +1076,16 @@ export default function ShardsteadGame() {
         <div className="look-zone" onPointerDown={handleLookStart} onPointerMove={handleLookMove} aria-label="Drag to look" />
         <div className="action-cluster">
           {(["mine", "place", "jump", "camera"] as const).map((action) => (
-            <button key={action} type="button" onPointerDown={(event) => pressAction(event, action)} aria-label={action}>
+            <button key={action} type="button" onPointerDown={(event) => pressAction(event, action)} onPointerUp={action === "mine" ? releaseMine : undefined} onPointerCancel={action === "mine" ? releaseMine : undefined} onPointerLeave={action === "mine" ? releaseMine : undefined} aria-label={action}>
               <span className={`control-icon icon-${action}`} aria-hidden="true" /><small>{action === "mine" ? "ATTACK" : action === "place" ? "BUILD" : action.toUpperCase()}</small>
             </button>
           ))}
-          <button type="button" onPointerDown={(event) => { stopTouch(event); setInventoryOpen(true); setPaused(true); }} aria-label="inventory"><ItemCube texture="/textures/core-metal.png" /><small>PACK</small></button>
         </div>
       </div>
       {intro && (
         <section className="entry-screen" aria-labelledby="game-title">
           <div className="entry-panel"><div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">{activeWorld.mode.toUpperCase()} WORLD</p><h1 id="game-title">{activeWorld.name}</h1><p className="tagline">The frontier grows with every step.</p><p className="entry-copy">Regional oceans, endless chunk streaming, structures, creatures, mining, building, and device-local saves.</p><button type="button" className="primary-button" onClick={begin}>ENTER WORLD</button><span className="input-note">{mobile ? "Touch controls enabled · rotate any time" : "Keyboard + mouse · Click to capture cursor"}</span></div>
-          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 004</div>
+          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 005</div>
         </section>
       )}
       {!intro && paused && (
@@ -973,7 +1095,7 @@ export default function ShardsteadGame() {
           </div>
         </section>
       )}
-      {inventoryOpen && <section className="inventory-screen"><div className="inventory-panel"><p className="eyebrow">{activeWorld.mode.toUpperCase()} INVENTORY</p><h2>Explorer Pack</h2><div className="inventory-grid">{HOTBAR.map((item) => <button type="button" key={item.type} onClick={() => { setSelected(item.type); setInventoryOpen(false); setPaused(false); }}><ItemCube texture={item.texture} /><strong>{BLOCK_LABELS[item.type]}</strong><span>{activeWorld.mode === "creative" ? "Unlimited" : `${inventory[item.type] ?? 0} blocks`}</span></button>)}</div><button type="button" className="primary-button" onClick={() => { setInventoryOpen(false); setPaused(false); }}>CLOSE PACK</button></div></section>}
+      {inventoryOpen && <section className="inventory-screen"><div className="inventory-panel"><p className="eyebrow">{activeWorld.mode.toUpperCase()} INVENTORY</p><h2>Inventory</h2><div className="inventory-layout"><aside className="equipment-panel"><div className="armor-slots">{["HEAD", "BODY", "LEGS", "FEET"].map((slot) => <span key={slot}>{slot}</span>)}</div><div className="player-paperdoll"><b>◇</b><i /><strong>EXPLORER</strong></div></aside><div className="storage-panel"><div className="inventory-grid">{Array.from({ length: 27 }, (_, index) => { const item = INVENTORY_ITEMS[index]; const available = item && (activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0); return <button type="button" key={index} disabled={!available} onClick={() => { if (item) setSelected(item.type); }}>{available && item ? <><ItemCube texture={item.texture} /><span>{activeWorld.mode === "creative" ? "∞" : inventory[item.type]}</span></> : null}</button>; })}</div><div className="inventory-hotbar-row">{Array.from({ length: 9 }, (_, index) => { const item = HOTBAR[index]; const available = item && (activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0); return <button type="button" key={index} className={item?.type === selected ? "selected" : ""} disabled={!available} onClick={() => { if (item) setSelected(item.type); }}>{available && item ? <><ItemCube texture={item.texture} /><span>{activeWorld.mode === "creative" ? "∞" : inventory[item.type]}</span></> : null}</button>; })}</div></div></div><button type="button" className="primary-button" onClick={() => { setInventoryOpen(false); setPaused(false); }}>RETURN TO WORLD</button></div></section>}
       {!mobile && !intro && !paused && !locked && <button type="button" className="capture-prompt" onClick={resume}>CLICK TO CONTROL</button>}
     </main>
   );
