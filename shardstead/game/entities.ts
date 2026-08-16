@@ -19,6 +19,34 @@ export type Mossback = {
   phase: number;
 };
 
+export type Settler = {
+  id: string;
+  chunk: string;
+  name: string;
+  root: THREE.Group;
+  leftArm: THREE.Group;
+  rightArm: THREE.Group;
+  leftLeg: THREE.Group;
+  rightLeg: THREE.Group;
+  home: THREE.Vector3;
+  heading: number;
+  turnAt: number;
+  phase: number;
+};
+
+export type RiftWarden = {
+  id: string;
+  chunk: string;
+  root: THREE.Group;
+  leftArm: THREE.Group;
+  rightArm: THREE.Group;
+  core: THREE.Mesh;
+  health: number;
+  maxHealth: number;
+  pulseAt: number;
+  phase: number;
+};
+
 function preparedTexture(loader: THREE.TextureLoader, path: string, renderer: THREE.WebGLRenderer) {
   const texture = loader.load(path);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -149,4 +177,81 @@ export function createMossback(
     root.add(crystal);
   }
   return { id, chunk, root, health: 3, heading: 0, turnAt: 0, phase: Math.random() * Math.PI * 2 };
+}
+
+function markEntity(root: THREE.Object3D, key: "settlerId" | "bossId", id: string) {
+  root.traverse((part) => { part.userData[key] = id; });
+}
+
+export function createSettler(
+  id: string,
+  chunk: string,
+  name: string,
+  loader: THREE.TextureLoader,
+  renderer: THREE.WebGLRenderer,
+  x: number,
+  y: number,
+  z: number,
+): Settler {
+  const face = new THREE.MeshLambertMaterial({ map: preparedTexture(loader, "/npcs/settler-face.png", renderer) });
+  const cloth = new THREE.MeshLambertMaterial({ map: preparedTexture(loader, "/npcs/settler-cloth.png", renderer) });
+  const apron = new THREE.MeshLambertMaterial({ map: preparedTexture(loader, "/npcs/settler-apron.png", renderer) });
+  const gear = new THREE.MeshLambertMaterial({ map: preparedTexture(loader, "/npcs/settler-gear.png", renderer) });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xb87958 });
+  const root = new THREE.Group();
+  root.position.set(x, y, z);
+  root.name = name;
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.7, 0.34), [cloth, cloth, cloth, cloth, apron, gear]);
+  body.position.y = 1.03; body.castShadow = true; root.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.52, 0.48), [skin, skin, cloth, skin, face, cloth]);
+  head.position.y = 1.64; head.castShadow = true; root.add(head);
+  const leftArm = limb(cloth, 0.2, 0.68, 0.23);
+  const rightArm = limb(cloth, 0.2, 0.68, 0.23);
+  leftArm.position.set(-0.43, 1.34, 0); rightArm.position.set(0.43, 1.34, 0); root.add(leftArm, rightArm);
+  const leftLeg = limb(gear, 0.25, 0.66, 0.27);
+  const rightLeg = limb(gear, 0.25, 0.66, 0.27);
+  leftLeg.position.set(-0.16, 0.68, 0); rightLeg.position.set(0.16, 0.68, 0); root.add(leftLeg, rightLeg);
+  const sash = new THREE.Mesh(new THREE.BoxGeometry(0.69, 0.14, 0.37), apron);
+  sash.position.set(0, 0.78, 0); root.add(sash);
+  markEntity(root, "settlerId", id);
+  return { id, chunk, name, root, leftArm, rightArm, leftLeg, rightLeg, home: new THREE.Vector3(x, y, z), heading: 0, turnAt: 0, phase: Math.random() * Math.PI * 2 };
+}
+
+export function createRiftWarden(
+  id: string,
+  chunk: string,
+  loader: THREE.TextureLoader,
+  renderer: THREE.WebGLRenderer,
+  x: number,
+  y: number,
+  z: number,
+): RiftWarden {
+  const faceTexture = preparedTexture(loader, "/bosses/warden-face.png", renderer);
+  const stone = new THREE.MeshStandardMaterial({ map: preparedTexture(loader, "/bosses/warden-stone.png", renderer), roughness: 0.82, metalness: 0.08 });
+  const face = new THREE.MeshStandardMaterial({ map: faceTexture, emissive: new THREE.Color(0x4f1592), emissiveMap: faceTexture, emissiveIntensity: 0.55, roughness: 0.62 });
+  const copper = new THREE.MeshStandardMaterial({ map: preparedTexture(loader, "/bosses/warden-copper.png", renderer), roughness: 0.43, metalness: 0.66 });
+  const riftTexture = preparedTexture(loader, "/bosses/warden-rift.png", renderer);
+  const rift = new THREE.MeshStandardMaterial({ map: riftTexture, emissive: new THREE.Color(0x5127d9), emissiveMap: riftTexture, emissiveIntensity: 1.2, roughness: 0.24 });
+  const root = new THREE.Group();
+  root.position.set(x, y, z); root.name = "Rift Warden";
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.38, 1.45, 0.72), [stone, stone, copper, stone, copper, stone]);
+  torso.position.y = 1.75; torso.castShadow = true; root.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.86, 0.9), [stone, stone, stone, stone, face, stone]);
+  head.position.y = 2.88; head.castShadow = true; root.add(head);
+  const leftArm = limb(stone, 0.46, 1.36, 0.5);
+  const rightArm = limb(stone, 0.46, 1.36, 0.5);
+  leftArm.position.set(-0.96, 2.35, 0); rightArm.position.set(0.96, 2.35, 0); root.add(leftArm, rightArm);
+  for (const px of [-0.38, 0.38]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.48, 1.05, 0.55), stone);
+    leg.position.set(px, 0.55, 0); leg.castShadow = true; root.add(leg);
+  }
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.34, 0), rift);
+  core.position.set(0, 1.83, 0.47); core.castShadow = true; root.add(core);
+  for (const px of [-0.82, 0.82]) {
+    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), rift);
+    shard.scale.set(0.7, 1.8, 0.7); shard.position.set(px, 3.2, 0); root.add(shard);
+  }
+  markEntity(root, "bossId", id);
+  return { id, chunk, root, leftArm, rightArm, core, health: 30, maxHealth: 30, pulseAt: 0, phase: Math.random() * Math.PI * 2 };
 }

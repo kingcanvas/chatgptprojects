@@ -1,6 +1,6 @@
 # Shardstead
 
-Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Hardwon (Build 005)**.
+Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Riftfolk (Build 006)**.
 
 ## Play now
 
@@ -33,8 +33,10 @@ The same link works on desktop and mobile. Progress is saved locally in that bro
 - First-person, third-person, and front-facing camera modes
 - A rebuilt original explorer with hair, armor, pack, belt, first-person arm, and action animations
 - Wandering original Mossback creatures that can be encountered and attacked
+- Hearthcross village with two animated, talkable settlers and custom character materials
+- A southeast Rift Warden arena, 30-health boss fight, shockwave attacks, health bar, persistent victory, and survival loot
 - Solid player collision with terrain, structures, trees, placed blocks, walls, and ceilings
-- Standalone iPhone Home Screen support with safe-area-aware landscape controls and aligned hitboxes
+- Standalone iPhone Home Screen support with safe-area-aware landscape controls, aligned hitboxes, and a viewport-contained inventory with an always-visible close control
 - Low, Balanced, and High graphics presets plus adjustable view distance
 - Device-local world and player saving
 - Original hand-painted textures generated specifically for Shardstead
@@ -57,7 +59,7 @@ npm run lint
 
 ## Project status
 
-Wildfront is a major foundation milestone, not the finished game. The larger design, technical roadmap, content plan, PC/mobile targets, optimization tiers, and production phases are documented in [PLANS.md](./PLANS.md).
+Riftfolk is a major playable milestone, not the finished game. The larger design, technical roadmap, content plan, PC/mobile targets, optimization tiers, and production phases are documented in [PLANS.md](./PLANS.md).
 
 ## Original assets
 

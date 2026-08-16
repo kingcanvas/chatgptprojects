@@ -21,6 +21,8 @@ export const CHUNK_SIZE = 10;
 export const SEA_LEVEL = 2;
 export const blockKey = (x: number, y: number, z: number) => `${x}|${y}|${z}`;
 export const chunkKey = (x: number, z: number) => `${x},${z}`;
+export const VILLAGE_CHUNK = { x: 1, z: 0 } as const;
+export const BOSS_CHUNK = { x: 3, z: 1 } as const;
 
 export function hash2(x: number, z: number) {
   const value = Math.sin(x * 127.1 + z * 311.7) * 43758.5453123;
@@ -188,6 +190,47 @@ function addWorldCore(
   setBlock(world, keys, edits, 0, 7, 0, "crystal");
 }
 
+function addVillage(
+  world: Map<string, BlockType>,
+  keys: string[],
+  edits: Map<string, BlockType | null>,
+) {
+  const centerX = VILLAGE_CHUNK.x * CHUNK_SIZE + 5;
+  const centerZ = VILLAGE_CHUNK.z * CHUNK_SIZE + 5;
+  const ground = terrainHeight(centerX, centerZ);
+  for (let ox = -4; ox <= 4; ox += 1) for (let oz = -1; oz <= 1; oz += 1) {
+    setBlock(world, keys, edits, centerX + ox, ground, centerZ + oz, "sand");
+  }
+  for (const [hx, hz] of [[centerX - 3, centerZ - 3], [centerX + 3, centerZ + 3]]) {
+    for (let ox = -2; ox <= 2; ox += 1) for (let oz = -2; oz <= 2; oz += 1) {
+      if (Math.abs(ox) === 2 || Math.abs(oz) === 2) {
+        for (let y = 1; y <= 3; y += 1) {
+          if (!(oz === 2 && ox === 0 && y < 3)) setBlock(world, keys, edits, hx + ox, ground + y, hz + oz, y === 3 ? "bark" : "wood");
+        }
+      }
+      setBlock(world, keys, edits, hx + ox, ground + 4, hz + oz, Math.abs(ox) === 2 || Math.abs(oz) === 2 ? "bark" : "wood");
+    }
+  }
+  for (let y = 1; y <= 3; y += 1) setBlock(world, keys, edits, centerX, ground + y, centerZ, y === 3 ? "crystal" : "rune");
+}
+
+function addBossArena(
+  world: Map<string, BlockType>,
+  keys: string[],
+  edits: Map<string, BlockType | null>,
+) {
+  const centerX = BOSS_CHUNK.x * CHUNK_SIZE + 5;
+  const centerZ = BOSS_CHUNK.z * CHUNK_SIZE + 5;
+  const ground = Math.max(terrainHeight(centerX, centerZ), SEA_LEVEL + 1);
+  for (let ox = -4; ox <= 4; ox += 1) for (let oz = -4; oz <= 4; oz += 1) {
+    const distance = Math.hypot(ox, oz);
+    if (distance <= 4.5) setBlock(world, keys, edits, centerX + ox, ground, centerZ + oz, distance > 3.4 ? "rune" : "dark");
+  }
+  for (const [ox, oz] of [[-4, 0], [4, 0], [0, -4], [0, 4]]) {
+    for (let y = 1; y <= 3; y += 1) setBlock(world, keys, edits, centerX + ox, ground + y, centerZ + oz, y === 3 ? "crystal" : "dark");
+  }
+}
+
 export function generateChunk(
   chunkX: number,
   chunkZ: number,
@@ -218,6 +261,8 @@ export function generateChunk(
   }
 
   if (chunkX === 0 && chunkZ === 0) addWorldCore(world, keys, edits);
+  else if (chunkX === VILLAGE_CHUNK.x && chunkZ === VILLAGE_CHUNK.z) addVillage(world, keys, edits);
+  else if (chunkX === BOSS_CHUNK.x && chunkZ === BOSS_CHUNK.z) addBossArena(world, keys, edits);
   else {
     const roll = hash2(chunkX * 19 + 3, chunkZ * 23 - 8);
     const centerX = startX + 3 + Math.floor(hash2(chunkX, chunkZ) * 4);

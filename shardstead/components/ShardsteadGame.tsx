@@ -5,8 +5,9 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { createMossback, createPlayerRig, type Mossback } from "@/game/entities";
+import { createMossback, createPlayerRig, createRiftWarden, createSettler, type Mossback, type RiftWarden, type Settler } from "@/game/entities";
 import {
+  BOSS_CHUNK,
   blockKey,
   CHUNK_SIZE,
   chunkKey,
@@ -15,6 +16,7 @@ import {
   isOceanChunk,
   SEA_LEVEL,
   terrainHeight,
+  VILLAGE_CHUNK,
   type BlockCoord,
   type BlockType,
 } from "@/game/world";
@@ -142,7 +144,9 @@ export default function ShardsteadGame() {
   const healthRef = useRef(20);
   const foodRef = useRef(20);
   const [, setShards] = useState(0);
-  const [, setMessage] = useState("Find the glowing World Core");
+  const [message, setMessage] = useState("Find the glowing World Core");
+  const [npcDialogue, setNpcDialogue] = useState<{ name: string; text: string } | null>(null);
+  const [bossStatus, setBossStatus] = useState<{ health: number; maxHealth: number } | null>(null);
   const [mobile] = useState(() => isTouchDevice());
   useEffect(() => { const timer = window.setTimeout(() => setWorlds(loadWorlds()), 0); return () => window.clearTimeout(timer); }, []);
 
@@ -252,6 +256,7 @@ export default function ShardsteadGame() {
     let restoredPosition: [number, number, number] | null = null;
     let restoredYaw = 0;
     let restoredShards = 0;
+    let restoredBossDefeated = false;
     inventoryRef.current = {};
     healthRef.current = 20;
     foodRef.current = 20;
@@ -273,6 +278,7 @@ export default function ShardsteadGame() {
           health?: number;
           food?: number;
           starterRemoved?: boolean;
+          bossDefeated?: boolean;
         };
         if (Array.isArray(save.edits)) for (const [key, value] of save.edits) edits.set(key, value);
         if (Array.isArray(save.position) && save.position.length === 3) restoredPosition = save.position;
@@ -286,6 +292,7 @@ export default function ShardsteadGame() {
         }
         healthRef.current = THREE.MathUtils.clamp(save.health ?? 20, 0, 20);
         foodRef.current = THREE.MathUtils.clamp(save.food ?? 20, 0, 20);
+        restoredBossDefeated = Boolean(save.bossDefeated);
       }
     } catch {
       window.localStorage.removeItem(saveKey(activeWorld.id));
@@ -312,8 +319,13 @@ export default function ShardsteadGame() {
     const loadedChunks = new Map<string, string[]>();
     const worldGroup = new THREE.Group();
     const creatureGroup = new THREE.Group();
+    const settlerGroup = new THREE.Group();
+    const bossGroup = new THREE.Group();
     const creatures = new Map<string, Mossback>();
-    scene.add(worldGroup, creatureGroup);
+    const settlers = new Map<string, Settler>();
+    let warden: RiftWarden | null = null;
+    let bossDefeated = restoredBossDefeated;
+    scene.add(worldGroup, creatureGroup, settlerGroup, bossGroup);
     const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
     const matrix = new THREE.Matrix4();
     const worldMeshes: THREE.InstancedMesh[] = [];
@@ -376,6 +388,30 @@ export default function ShardsteadGame() {
       creatureGroup.add(creature.root);
     };
 
+    const spawnStoryEntities = (cx: number, cz: number) => {
+      const key = chunkKey(cx, cz);
+      if (cx === VILLAGE_CHUNK.x && cz === VILLAGE_CHUNK.z && !Array.from(settlers.values()).some((settler) => settler.chunk === key)) {
+        const centerX = cx * CHUNK_SIZE + 5;
+        const centerZ = cz * CHUNK_SIZE + 5;
+        const villagePeople = [["Mara", -2, 0], ["Orin", 2, 1]] as const;
+        villagePeople.forEach(([name, offsetX, offsetZ], index) => {
+          const id = `settler-${name.toLowerCase()}`;
+          const x = centerX + offsetX;
+          const z = centerZ + offsetZ;
+          const settler = createSettler(id, key, name, textureLoader, renderer, x, terrainHeight(centerX, centerZ) + 0.52, z);
+          settler.heading = index === 0 ? Math.PI : 0;
+          settlers.set(id, settler); settlerGroup.add(settler.root);
+        });
+      }
+      if (cx === BOSS_CHUNK.x && cz === BOSS_CHUNK.z && !bossDefeated && !warden) {
+        const x = cx * CHUNK_SIZE + 5;
+        const z = cz * CHUNK_SIZE + 5;
+        const y = Math.max(terrainHeight(x, z), SEA_LEVEL + 1) + 0.52;
+        warden = createRiftWarden("rift-warden", key, textureLoader, renderer, x, y, z);
+        bossGroup.add(warden.root);
+      }
+    };
+
     const streamWorld = (force = false) => {
       const centerX = Math.floor(player.position.x / CHUNK_SIZE);
       const centerZ = Math.floor(player.position.z / CHUNK_SIZE);
@@ -395,6 +431,7 @@ export default function ShardsteadGame() {
               water.receiveShadow = true; oceanMeshes.set(key, water); worldGroup.add(water);
             }
             spawnCreatureForChunk(cx, cz);
+            spawnStoryEntities(cx, cz);
             changed = true;
           }
         }
@@ -411,6 +448,10 @@ export default function ShardsteadGame() {
           creatureGroup.remove(creature.root);
           creatures.delete(key);
         }
+        for (const [id, settler] of settlers.entries()) if (settler.chunk === key) {
+          settlerGroup.remove(settler.root); settlers.delete(id);
+        }
+        if (warden?.chunk === key) { bossGroup.remove(warden.root); warden = null; setBossStatus(null); }
         changed = true;
       }
       if (changed || force) rebuildMeshes();
@@ -436,6 +477,7 @@ export default function ShardsteadGame() {
     let hungerTimer = 0;
     let recoveryTimer = 0;
     let creatureDamageCooldown = 0;
+    let bossHudVisible = false;
 
     const updateVitals = () => { setHealth(healthRef.current); setFood(foodRef.current); };
     const damagePlayer = (amount: number) => {
@@ -500,6 +542,7 @@ export default function ShardsteadGame() {
           health: healthRef.current,
           food: foodRef.current,
           starterRemoved: true,
+          bossDefeated,
         }));
       } catch {
         setMessage("Local save is full — keep exploring for now");
@@ -549,11 +592,57 @@ export default function ShardsteadGame() {
       return false;
     };
 
+    const talkToSettler = (id: string) => {
+      const settler = settlers.get(id);
+      if (!settler) return false;
+      const text = settler.name === "Mara"
+        ? "Welcome to Hearthcross. The Rift Warden waits southeast in a ring of black stone. Mine supplies before you challenge it."
+        : "Hold the attack control to mine in Survival. The Warden's core opens between pulses—keep moving and watch your food.";
+      stopMining();
+      setNpcDialogue({ name: settler.name, text });
+      setPaused(true);
+      if (document.pointerLockElement) document.exitPointerLock();
+      return true;
+    };
+
+    const damageBoss = (id: string) => {
+      if (!warden || warden.id !== id) return false;
+      warden.health = Math.max(0, warden.health - (activeWorld.mode === "creative" ? 5 : 1));
+      swingUntil = clock.elapsedTime + 0.22;
+      setBossStatus({ health: warden.health, maxHealth: warden.maxHealth });
+      if (warden.health <= 0) {
+        bossGroup.remove(warden.root);
+        warden = null;
+        bossDefeated = true;
+        setBossStatus(null);
+        restoredShards += 5;
+        setShards(restoredShards);
+        if (activeWorld.mode === "survival") {
+          inventoryRef.current.crystal = (inventoryRef.current.crystal ?? 0) + 8;
+          inventoryRef.current.metal = (inventoryRef.current.metal ?? 0) + 6;
+          setInventory({ ...inventoryRef.current });
+        }
+        setMessage("Rift Warden defeated — its crystal hoard is yours");
+        saveWorld();
+      } else setMessage(`Rift Warden · ${warden.health}/${warden.maxHealth}`);
+      return true;
+    };
+
     const interact = (placing: boolean) => {
       if (pausedRef.current) return;
       swingUntil = clock.elapsedTime + 0.22;
       raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
       if (!placing) {
+        const settlerHit = raycaster.intersectObject(settlerGroup, true)[0];
+        if (settlerHit && settlerHit.distance <= 4.8) {
+          const id = settlerHit.object.userData.settlerId as string | undefined;
+          if (id && talkToSettler(id)) return;
+        }
+        const bossHit = raycaster.intersectObject(bossGroup, true)[0];
+        if (bossHit && bossHit.distance <= 5.8) {
+          const id = bossHit.object.userData.bossId as string | undefined;
+          if (id && damageBoss(id)) return;
+        }
         const creatureHit = raycaster.intersectObject(creatureGroup, true)[0];
         if (creatureHit && creatureHit.distance <= 4.8) {
           const id = creatureHit.object.userData.creatureId as string | undefined;
@@ -620,6 +709,12 @@ export default function ShardsteadGame() {
     };
     const startMining = () => {
       if (pausedRef.current) return;
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const settlerHit = raycaster.intersectObject(settlerGroup, true)[0];
+      if (settlerHit && settlerHit.distance <= 4.8) {
+        const id = settlerHit.object.userData.settlerId as string | undefined;
+        if (id && talkToSettler(id)) return;
+      }
       if (activeWorld.mode === "creative") interact(false);
       else miningActive = true;
     };
@@ -822,6 +917,58 @@ export default function ShardsteadGame() {
         }
       }
 
+      for (const settler of settlers.values()) {
+        const distanceHome = settler.root.position.distanceTo(settler.home);
+        const distancePlayer = settler.root.position.distanceTo(player.position);
+        if (distancePlayer < 4.5) {
+          settler.heading = Math.atan2(player.position.x - settler.root.position.x, player.position.z - settler.root.position.z);
+        } else {
+          if (elapsed > settler.turnAt) {
+            settler.heading += (hash2(Math.floor(elapsed) + settler.root.position.x, settler.root.position.z) - .5) * 1.8;
+            settler.turnAt = elapsed + 3 + hash2(settler.root.position.z, Math.floor(elapsed)) * 3;
+          }
+          if (distanceHome > 4.2) settler.heading = Math.atan2(settler.home.x - settler.root.position.x, settler.home.z - settler.root.position.z);
+          const speed = .24 * dt;
+          settler.root.position.x += Math.sin(settler.heading) * speed;
+          settler.root.position.z += Math.cos(settler.heading) * speed;
+        }
+        settler.root.position.y = settler.home.y + Math.sin(elapsed * 3 + settler.phase) * .015;
+        settler.root.rotation.y = settler.heading;
+        const step = distancePlayer < 4.5 ? 0 : Math.sin(elapsed * 6 + settler.phase) * .38;
+        settler.leftArm.rotation.x = -step; settler.rightArm.rotation.x = step;
+        settler.leftLeg.rotation.x = step; settler.rightLeg.rotation.x = -step;
+      }
+
+      if (warden) {
+        const distance = warden.root.position.distanceTo(player.position);
+        if (distance < 18) {
+          if (!bossHudVisible) {
+            bossHudVisible = true;
+            setBossStatus({ health: warden.health, maxHealth: warden.maxHealth });
+          }
+          const heading = Math.atan2(player.position.x - warden.root.position.x, player.position.z - warden.root.position.z);
+          warden.root.rotation.y = heading;
+          if (!pausedRef.current && distance > 1.7) {
+            const speed = .82 * dt;
+            warden.root.position.x += Math.sin(heading) * speed;
+            warden.root.position.z += Math.cos(heading) * speed;
+            warden.root.position.y = Math.max(terrainHeight(Math.round(warden.root.position.x), Math.round(warden.root.position.z)), SEA_LEVEL + 1) + .52;
+          }
+          if (activeWorld.mode === "survival" && !pausedRef.current && distance < 2 && elapsed > creatureDamageCooldown) {
+            creatureDamageCooldown = elapsed + 1.2; damagePlayer(3);
+          }
+          if (activeWorld.mode === "survival" && !pausedRef.current && distance < 6 && elapsed > warden.pulseAt) {
+            warden.pulseAt = elapsed + 4.5; damagePlayer(2);
+            player.velocity.y = Math.max(player.velocity.y, 4.2);
+            setMessage("The Rift Warden released a shockwave");
+          }
+        } else if (bossHudVisible) { bossHudVisible = false; setBossStatus(null); }
+        const pulse = 1 + Math.sin(elapsed * 3.6 + warden.phase) * .14;
+        warden.core.scale.setScalar(pulse);
+        warden.leftArm.rotation.x = Math.sin(elapsed * 2.1) * .28;
+        warden.rightArm.rotation.x = -warden.leftArm.rotation.x;
+      }
+
       playerRig.root.visible = player.mode !== "first";
       playerRig.firstPersonArm.visible = player.mode === "first";
       playerRig.root.position.copy(player.position);
@@ -856,12 +1003,16 @@ export default function ShardsteadGame() {
 
       if (miningActive && activeWorld.mode === "survival" && !pausedRef.current) {
         raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const bossHit = raycaster.intersectObject(bossGroup, true)[0];
         const creatureHit = raycaster.intersectObject(creatureGroup, true)[0];
         const blockHit = raycaster.intersectObjects(worldMeshes, false)[0];
         let targetKey = "";
         let required = .55;
         let targetBlock: BlockCoord | null = null;
-        if (creatureHit && creatureHit.distance <= 4.8) {
+        if (bossHit && bossHit.distance <= 5.8) {
+          targetKey = `boss:${String(bossHit.object.userData.bossId ?? "")}`;
+          required = .48;
+        } else if (creatureHit && creatureHit.distance <= 4.8) {
           targetKey = `creature:${String(creatureHit.object.userData.creatureId ?? "")}`;
         } else if (blockHit && blockHit.instanceId !== undefined && blockHit.instanceId !== null) {
           targetBlock = (blockHit.object.userData.blocks as BlockCoord[])[blockHit.instanceId];
@@ -1018,7 +1169,7 @@ export default function ShardsteadGame() {
   if (!activeWorld) return (
     <main className="home-screen">
       <section className="home-panel">
-        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 005 · HARDWON</p><h1>SHARDSTEAD</h1>
+        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 006 · RIFTFOLK</p><h1>SHARDSTEAD</h1>
         <p className="tagline">Choose a world. Keep every frontier.</p>
         {creating ? <div className="world-creator">
           <label>World name<input value={newWorldName} maxLength={30} onChange={(e) => setNewWorldName(e.target.value)} /></label>
@@ -1052,6 +1203,8 @@ export default function ShardsteadGame() {
       <div className="crosshair" aria-hidden="true"><i /><i /></div>
       {breakProgress > 0 && <div className="break-progress" style={{ "--break": `${Math.round(breakProgress * 360)}deg` } as React.CSSProperties} aria-label={`Breaking ${Math.round(breakProgress * 100)} percent`} />}
       {activeWorld.mode === "survival" && <div className="survival-hud" aria-label={`Health ${health} of 20, food ${food} of 20`}><div className="vital-row health-row">{Array.from({ length: 10 }, (_, index) => <i key={index} className={health > index * 2 ? "filled" : ""}>♥</i>)}</div><div className="vital-row food-row">{Array.from({ length: 10 }, (_, index) => <i key={index} className={food > index * 2 ? "filled" : ""}>◆</i>)}</div></div>}
+      {bossStatus && <div className="boss-hud" aria-label={`Rift Warden health ${bossStatus.health} of ${bossStatus.maxHealth}`}><strong>RIFT WARDEN</strong><span><i style={{ width: `${(bossStatus.health / bossStatus.maxHealth) * 100}%` }} /></span><small>{bossStatus.health} / {bossStatus.maxHealth}</small></div>}
+      {!intro && !paused && <div className="status-toast" aria-live="polite">{message}</div>}
       <button type="button" className="inventory-toggle" onPointerDown={(event) => { stopTouch(event); setInventoryOpen(true); setPaused(true); }} aria-label="Open inventory">•••</button>
       <nav className="hotbar" aria-label="Building materials">
         {HOTBAR.map((item, index) => (
@@ -1085,7 +1238,7 @@ export default function ShardsteadGame() {
       {intro && (
         <section className="entry-screen" aria-labelledby="game-title">
           <div className="entry-panel"><div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">{activeWorld.mode.toUpperCase()} WORLD</p><h1 id="game-title">{activeWorld.name}</h1><p className="tagline">The frontier grows with every step.</p><p className="entry-copy">Regional oceans, endless chunk streaming, structures, creatures, mining, building, and device-local saves.</p><button type="button" className="primary-button" onClick={begin}>ENTER WORLD</button><span className="input-note">{mobile ? "Touch controls enabled · rotate any time" : "Keyboard + mouse · Click to capture cursor"}</span></div>
-          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 005</div>
+          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 006</div>
         </section>
       )}
       {!intro && paused && (
@@ -1095,7 +1248,10 @@ export default function ShardsteadGame() {
           </div>
         </section>
       )}
-      {inventoryOpen && <section className="inventory-screen"><div className="inventory-panel"><p className="eyebrow">{activeWorld.mode.toUpperCase()} INVENTORY</p><h2>Inventory</h2><div className="inventory-layout"><aside className="equipment-panel"><div className="armor-slots">{["HEAD", "BODY", "LEGS", "FEET"].map((slot) => <span key={slot}>{slot}</span>)}</div><div className="player-paperdoll"><b>◇</b><i /><strong>EXPLORER</strong></div></aside><div className="storage-panel"><div className="inventory-grid">{Array.from({ length: 27 }, (_, index) => { const item = INVENTORY_ITEMS[index]; const available = item && (activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0); return <button type="button" key={index} disabled={!available} onClick={() => { if (item) setSelected(item.type); }}>{available && item ? <><ItemCube texture={item.texture} /><span>{activeWorld.mode === "creative" ? "∞" : inventory[item.type]}</span></> : null}</button>; })}</div><div className="inventory-hotbar-row">{Array.from({ length: 9 }, (_, index) => { const item = HOTBAR[index]; const available = item && (activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0); return <button type="button" key={index} className={item?.type === selected ? "selected" : ""} disabled={!available} onClick={() => { if (item) setSelected(item.type); }}>{available && item ? <><ItemCube texture={item.texture} /><span>{activeWorld.mode === "creative" ? "∞" : inventory[item.type]}</span></> : null}</button>; })}</div></div></div><button type="button" className="primary-button" onClick={() => { setInventoryOpen(false); setPaused(false); }}>RETURN TO WORLD</button></div></section>}
+      {inventoryOpen && <section className="inventory-screen" aria-label="Inventory"><div className="inventory-panel">
+        <button type="button" className="inventory-close" aria-label="Close inventory" onPointerDown={(event) => { stopTouch(event); setInventoryOpen(false); setPaused(false); }}>×</button>
+        <p className="eyebrow">{activeWorld.mode.toUpperCase()} INVENTORY</p><h2>Inventory</h2><div className="inventory-layout"><aside className="equipment-panel"><div className="armor-slots">{["HEAD", "BODY", "LEGS", "FEET"].map((slot) => <span key={slot}>{slot}</span>)}</div><div className="player-paperdoll"><b>◇</b><i /><strong>EXPLORER</strong></div></aside><div className="storage-panel"><div className="inventory-grid">{Array.from({ length: 27 }, (_, index) => { const item = INVENTORY_ITEMS[index]; const available = item && (activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0); return <button type="button" key={index} disabled={!available} onClick={() => { if (item) setSelected(item.type); }}>{available && item ? <><ItemCube texture={item.texture} /><span>{activeWorld.mode === "creative" ? "∞" : inventory[item.type]}</span></> : null}</button>; })}</div><div className="inventory-hotbar-row">{Array.from({ length: 9 }, (_, index) => { const item = HOTBAR[index]; const available = item && (activeWorld.mode === "creative" || (inventory[item.type] ?? 0) > 0); return <button type="button" key={index} className={item?.type === selected ? "selected" : ""} disabled={!available} onClick={() => { if (item) setSelected(item.type); }}>{available && item ? <><ItemCube texture={item.texture} /><span>{activeWorld.mode === "creative" ? "∞" : inventory[item.type]}</span></> : null}</button>; })}</div></div></div><button type="button" className="primary-button inventory-return" onClick={() => { setInventoryOpen(false); setPaused(false); }}>RETURN TO WORLD</button></div></section>}
+      {npcDialogue && <section className="dialogue-screen" aria-label={`Talking to ${npcDialogue.name}`}><div className="dialogue-panel"><p className="eyebrow">HEARTHCROSS SETTLER</p><h2>{npcDialogue.name}</h2><p>{npcDialogue.text}</p><button type="button" className="primary-button" onPointerDown={(event) => { stopTouch(event); setNpcDialogue(null); setPaused(false); }}>CONTINUE</button></div></section>}
       {!mobile && !intro && !paused && !locked && <button type="button" className="capture-prompt" onClick={resume}>CLICK TO CONTROL</button>}
     </main>
   );

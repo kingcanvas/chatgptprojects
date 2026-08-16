@@ -19,6 +19,28 @@ This file records where the visible game assets came from so future work can kee
 
 All new expressive art, textures, icons, models, sprites, and promotional images should be created specifically for Shardstead or documented here with an approved source and license. Simple interface geometry may remain CSS/code-native.
 
+## Riftfolk settler atlas v1
+
+- Created: August 15, 2026
+- Method: ChatGPT built-in image generation, inspection, then lossless 2×2 atlas slicing
+- Source: `shardstead-settler-atlas-v1.png`, 1254 × 1254
+- Production assets: `public/npcs/settler-face.png`, `settler-cloth.png`, `settler-apron.png`, and `settler-gear.png`
+
+### Exact generation prompt
+
+> Use case: stylized-concept. Asset type: production texture atlas for a browser-based 3D voxel survival game NPC. Primary request: Create one original square 2x2 texture atlas for a Shardstead settler NPC, with four crisp, exactly equal quadrants and no gutters, borders, separators, labels, or text. Scene/backdrop: each quadrant is a seamless or centered flat orthographic texture swatch filling its entire quadrant. Subject: Top-left: friendly adult explorer-crafter face texture, warm approachable features, calm eyes, subtle sun-weathered skin, simplified frontal face usable on a box-mesh head. Top-right: woven teal-and-moss tunic material, visible handwoven fibers and restrained geometric stitching. Bottom-left: rugged brown leather apron and tool-belt material, small pockets, straps, brass fasteners, believable wear, no separate floating tools. Bottom-right: dark brown boots-and-hair material combining sturdy worn leather and dense dark hair fibers in a coherent tiling material. Style/medium: flat orthographic hand-painted low-poly and voxel-game texture art, crisp readable shapes, production-ready, original Shardstead visual identity, painterly but not blurry, tile-friendly surface detail. Composition/framing: perfectly square canvas divided mathematically into four equal square quadrants; every quadrant fills edge-to-edge; no perspective scene, no character body, no mockup. Lighting/mood: neutral even diffuse lighting baked very lightly, no cast shadows, no dramatic highlights. Color palette: deep teal, moss green, weathered umber, warm skin, muted brass, dark chestnut; cohesive grounded fantasy-survival palette. Materials/textures: readable at small size, clean color separation, subtle hand-painted surface variation, low visual noise. Constraints: original design; four equal quadrants in the exact order specified; usable directly on simple box meshes; no Minecraft copying or resemblance; no text, numbers, logo, watermark, frame, grid line, border, gutter, labels, icons, or UI. Avoid: photorealism, isometric perspective, rendered 3D objects, full character portraits, extra quadrants, muddy detail, seams between quadrants, typography, branding.
+
+## Riftfolk Rift Warden atlas v1
+
+- Created: August 15, 2026
+- Method: ChatGPT built-in image generation, inspection, then lossless 2×2 atlas slicing
+- Source: `shardstead-rift-warden-atlas-v1.png`, 1254 × 1254
+- Production assets: `public/bosses/warden-face.png`, `warden-stone.png`, `warden-copper.png`, and `warden-rift.png`
+
+### Exact generation prompt
+
+> Use case: stylized-concept. Asset type: production texture atlas for a 3D low-poly/voxel browser game boss built from box meshes. Primary request: Create one square 2x2 texture atlas for an original Shardstead boss named the Rift Warden. The atlas must contain four crisp, perfectly equal square quadrants with clean straight boundaries and no spacing or labels. Quadrants: top-left masked stone face texture with narrow luminous violet and cyan eye slits; top-right dark fractured stone armor texture with subtle beveled plate seams; bottom-left oxidized copper rune plating texture with teal verdigris and restrained original geometric rune channels; bottom-right glowing rift-crystal energy material with violet, indigo, and cyan crystalline fractures. Scene/backdrop: flat orthographic material presentation only, each quadrant completely fills its cell, no perspective scene and no objects extending across quadrant boundaries. Style/medium: hand-painted low-poly/voxel-game texture art, crisp readable details, tile-friendly surfaces, production-ready texture atlas. Composition/framing: exact square canvas, exact 2-by-2 grid, four equal quadrants, face texture centered front-on in its quadrant, material textures front-on and evenly lit. Lighting/mood: imposing ancient rift guardian, controlled baked highlights, strong readable contrast without photorealistic reflections. Color palette: charcoal stone, near-black slate, aged copper, teal verdigris, luminous violet and cyan. Materials/textures: chipped stone, carved armor seams, weathered copper, crystalline emissive cracks. Constraints: original Shardstead identity; usable directly on box meshes; hard clean grid alignment; no borders; no gutters; no labels; no typography; no logo; no watermark; no character body; no weapons; no environmental background; do not imitate or copy Minecraft or any existing game texture.
+
 ## Wildfront character atlas v1
 
 - Created: August 15, 2026
