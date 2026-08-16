@@ -1,6 +1,6 @@
 # Shardstead
 
-Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Worldkeeper (Build 003)**.
+Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Tideborn (Build 004)**.
 
 ## Play now
 
@@ -17,6 +17,10 @@ The same link works on desktop and mobile. Progress is saved locally in that bro
 - Persistent per-world player position, block edits, shards, game mode, and inventory
 - A real inventory with code-rendered 3D block previews and Survival quantities
 - Regional coastlines and oceans instead of a global water sheet beneath the world
+- Animated shader water with moving texture currents and geometry waves
+- Swimming physics with drag, gentle sinking, and Jump-to-rise controls
+- Cinematic rendering with PBR materials, ACES color, soft shadows, stronger waves, and bloom
+- Creative flight, placement validity previews, and rotating local save backups
 - Meadows, forests, highlands, shores, rift regions, ruins, watchtowers, and rift arches
 - A glowing World Core landmark and first shard-recovery objective
 - Mine blocks, collect rift shards, select materials, and place new blocks

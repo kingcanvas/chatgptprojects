@@ -63,17 +63,7 @@ button { color: inherit; touch-action: none; -webkit-tap-highlight-color: transp
 }
 .hud-button:hover { border-color: rgba(115,228,192,.7); }
 
-.objective-card {
-  position: fixed; z-index: 15; top: 92px; left: 24px; width: min(290px, calc(100vw - 48px)); padding: 15px 17px 14px;
-  border-left: 2px solid var(--aqua); background: linear-gradient(90deg, rgba(6,14,13,.86), rgba(6,14,13,.46));
-  box-shadow: 0 14px 32px rgba(0,0,0,.16); pointer-events: none;
-}
 .eyebrow { display: block; margin: 0 0 6px; color: var(--aqua); font-size: 9px; font-weight: 900; letter-spacing: .2em; }
-.objective-card strong { font-family: Georgia, serif; font-size: 17px; font-weight: 500; }
-.objective-card p { margin: 5px 0 10px; color: var(--muted); font-size: 11px; }
-.objective-card small { color: #a8bbb4; font-size: 9px; }
-.objective-progress { height: 3px; margin-bottom: 7px; overflow: hidden; background: rgba(255,255,255,.12); }
-.objective-progress span { display: block; height: 100%; background: linear-gradient(90deg, #53c4a5, #dcbb64); box-shadow: 0 0 8px rgba(115,228,192,.7); transition: width 240ms ease; }
 .camera-chip {
   position: fixed; z-index: 10; right: 24px; top: 92px; padding: 8px 11px; border-radius: 4px;
   color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .1em; pointer-events: none;
@@ -159,9 +149,6 @@ input[type="range"] { width: 100%; accent-color: #62d1ae; }
   .brand-lockup strong { font-size: 15px; }
   .brand-lockup small, .world-readout, .desktop-help { display: none; }
   .hud-button { min-height: 38px; }
-  .objective-card { top: 70px; left: 14px; width: min(250px, calc(100vw - 86px)); padding: 11px 13px; }
-  .objective-card strong { font-size: 14px; }
-  .objective-card p { margin-bottom: 7px; }
   .camera-chip { top: auto; right: 14px; bottom: calc(185px + env(safe-area-inset-bottom)); }
   .hotbar { bottom: calc(12px + env(safe-area-inset-bottom)); gap: 3px; }
   .hotbar button { width: min(17vw, 58px); height: min(17vw, 58px); }
@@ -193,9 +180,6 @@ input[type="range"] { width: 100%; accent-color: #62d1ae; }
   .top-hud { padding: max(7px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
   .brand-rune { width: 29px; height: 29px; font-size: 14px; }
   .brand-lockup strong { font-size: 13px; }
-  .objective-card { top: 48px; left: max(12px, env(safe-area-inset-left)); width: 225px; padding: 8px 11px; }
-  .objective-card p { margin: 3px 0 5px; }
-  .objective-progress, .objective-card small { display: none; }
   .camera-chip { right: max(12px, env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); }
   .hotbar { bottom: calc(6px + env(safe-area-inset-bottom)); }
   .hotbar button { width: 48px; height: 48px; transform: none !important; }
@@ -224,8 +208,6 @@ input[type="range"] { width: 100%; accent-color: #62d1ae; }
 }
 
 @media (max-height: 600px) and (pointer: coarse) {
-  .objective-card { top: 57px; }
-  .objective-card p, .objective-progress, .objective-card small { display: none; }
   .entry-panel { padding-top: 24px; padding-bottom: 24px; }
   .core-mark { display: none; }
   .entry-copy { margin: 13px auto; }

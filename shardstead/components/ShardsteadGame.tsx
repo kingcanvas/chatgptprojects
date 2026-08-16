@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { createMossback, createPlayerRig, type Mossback } from "@/game/entities";
 import {
   blockKey,
@@ -120,8 +123,8 @@ export default function ShardsteadGame() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [inventory, setInventory] = useState<Inventory>({});
-  const [shards, setShards] = useState(0);
-  const [message, setMessage] = useState("Find the glowing World Core");
+  const [, setShards] = useState(0);
+  const [, setMessage] = useState("Find the glowing World Core");
   const [mobile] = useState(() => isTouchDevice());
   useEffect(() => { const timer = window.setTimeout(() => setWorlds(loadWorlds()), 0); return () => window.clearTimeout(timer); }, []);
 
@@ -162,11 +165,17 @@ export default function ShardsteadGame() {
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: "high-performance" });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x8ab5b0);
     scene.fog = new THREE.FogExp2(0x8ab5b0, 0.017);
     const camera = new THREE.PerspectiveCamera(68, 1, 0.08, 190);
+    const composer = new EffectComposer(renderer);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.48, 0.55, 0.78);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(bloom);
     const clock = new THREE.Clock();
     const raycaster = new THREE.Raycaster();
     raycaster.far = 6;
@@ -200,8 +209,8 @@ export default function ShardsteadGame() {
       crystal: loadTexture("rift-crystal"), metal: loadTexture("core-metal"), rune: loadTexture("rune-stone"), water: loadTexture("water"),
       snow: loadTexture("snow"), copper: loadTexture("copper-ore"), dark: loadTexture("dark-rock"), core: loadTexture("luminous-core"),
     };
-    const makeMaterial = (map: THREE.Texture, options: Partial<THREE.MeshLambertMaterialParameters> = {}) =>
-      new THREE.MeshLambertMaterial({ map, ...options });
+    const makeMaterial = (map: THREE.Texture, options: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
+      new THREE.MeshStandardMaterial({ map, roughness: 0.84, metalness: 0.02, ...options });
     const grassSide = makeMaterial(textures.grassSide);
     const soilMaterial = makeMaterial(textures.soil);
     const blockMaterials: Record<BlockType, THREE.Material | THREE.Material[]> = {
@@ -213,7 +222,7 @@ export default function ShardsteadGame() {
       wood: makeMaterial(textures.wood),
       leaves: makeMaterial(textures.leaves),
       crystal: makeMaterial(textures.crystal, { emissive: new THREE.Color(0x4c1b78), emissiveMap: textures.crystal, emissiveIntensity: 0.42 }),
-      metal: makeMaterial(textures.metal),
+      metal: makeMaterial(textures.metal, { roughness: 0.38, metalness: 0.72 }),
       rune: makeMaterial(textures.rune, { emissive: new THREE.Color(0x075a66), emissiveMap: textures.rune, emissiveIntensity: 0.26 }),
       snow: makeMaterial(textures.snow),
       copper: makeMaterial(textures.copper),
@@ -227,7 +236,13 @@ export default function ShardsteadGame() {
     let restoredShards = 0;
     inventoryRef.current = activeWorld.mode === "creative" ? {} : { grass: 24, stone: 18, wood: 12, crystal: 3, metal: 6 };
     try {
-      const raw = window.localStorage.getItem(saveKey(activeWorld.id));
+      const primaryKey = saveKey(activeWorld.id);
+      const primary = window.localStorage.getItem(primaryKey);
+      let raw = primary ?? window.localStorage.getItem(`${primaryKey}:backup`);
+      if (primary) {
+        try { JSON.parse(primary); }
+        catch { raw = window.localStorage.getItem(`${primaryKey}:backup`); }
+      }
       if (raw) {
         const save = JSON.parse(raw) as {
           edits?: [string, BlockType | null][];
@@ -270,8 +285,24 @@ export default function ShardsteadGame() {
     const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
     const matrix = new THREE.Matrix4();
     const worldMeshes: THREE.InstancedMesh[] = [];
+    const placementMaterial = new THREE.MeshBasicMaterial({ color: 0x73e4c0, transparent: true, opacity: 0.24, wireframe: true, depthTest: false });
+    const placementPreview = new THREE.Mesh(new THREE.BoxGeometry(1.04, 1.04, 1.04), placementMaterial);
+    placementPreview.visible = false;
+    placementPreview.renderOrder = 20;
+    scene.add(placementPreview);
     const oceanMeshes = new Map<string, THREE.Mesh>();
-    const waterMaterial = new THREE.MeshPhongMaterial({ map: textures.water, color: 0x67b9c8, transparent: true, opacity: 0.74, shininess: 92, side: THREE.DoubleSide });
+    const waterMaterial = new THREE.ShaderMaterial({
+      uniforms: { uMap: { value: textures.water }, uTime: { value: 0 }, uWaveStrength: { value: 0.12 }, uOpacity: { value: 0.78 } },
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      vertexShader: `
+        uniform float uTime; uniform float uWaveStrength; varying vec2 vUv; varying float vWave;
+        void main(){ vUv=uv; vec3 p=position; float a=sin((p.x+uTime*1.7)*0.72); float b=cos((p.y-uTime*1.2)*0.91); float c=sin((p.x+p.y+uTime)*0.38); vWave=(a+b+c)/3.0; p.z+=vWave*uWaveStrength; gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0); }
+      `,
+      fragmentShader: `
+        uniform sampler2D uMap; uniform float uTime; uniform float uOpacity; varying vec2 vUv; varying float vWave;
+        void main(){ vec2 uv1=vUv*3.0+vec2(uTime*.018,uTime*.011); vec2 uv2=vUv*4.5+vec2(-uTime*.012,uTime*.021); vec3 t1=texture2D(uMap,uv1).rgb; vec3 t2=texture2D(uMap,uv2).rgb; float crest=smoothstep(.18,.92,vWave*.5+.5); vec3 deep=vec3(.035,.30,.38); vec3 shallow=vec3(.16,.67,.72); vec3 color=mix(deep,shallow,(t1.r+t2.g)*.45); color+=crest*vec3(.23,.42,.39); gl_FragColor=vec4(color,uOpacity); }
+      `,
+    });
 
     const rebuildMeshes = () => {
       for (const mesh of worldMeshes) worldGroup.remove(mesh);
@@ -323,7 +354,7 @@ export default function ShardsteadGame() {
           if (!loadedChunks.has(key)) {
             loadedChunks.set(key, generateChunk(cx, cz, world, edits));
             if (isOceanChunk(cx, cz)) {
-              const water = new THREE.Mesh(new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE), waterMaterial);
+              const water = new THREE.Mesh(new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, 12, 12), waterMaterial);
               water.rotation.x = -Math.PI / 2;
               water.position.set(cx * CHUNK_SIZE + CHUNK_SIZE / 2 - 0.5, SEA_LEVEL + 0.42, cz * CHUNK_SIZE + CHUNK_SIZE / 2 - 0.5);
               water.receiveShadow = true; oceanMeshes.set(key, water); worldGroup.add(water);
@@ -362,6 +393,7 @@ export default function ShardsteadGame() {
     const PLAYER_RADIUS = 0.31;
     const PLAYER_HEIGHT = 1.82;
     let swingUntil = 0;
+    let playerInWater = false;
 
     const isSolid = (type: BlockType | undefined) => Boolean(type);
     const collidesAt = (position: THREE.Vector3) => {
@@ -402,7 +434,10 @@ export default function ShardsteadGame() {
 
     const saveWorld = () => {
       try {
-        window.localStorage.setItem(saveKey(activeWorld.id), JSON.stringify({
+        const primaryKey = saveKey(activeWorld.id);
+        const previous = window.localStorage.getItem(primaryKey);
+        if (previous) window.localStorage.setItem(`${primaryKey}:backup`, previous);
+        window.localStorage.setItem(primaryKey, JSON.stringify({
           edits: Array.from(edits.entries()),
           position: player.position.toArray(),
           yaw: player.yaw,
@@ -420,7 +455,13 @@ export default function ShardsteadGame() {
       setMessage(`${CAMERA_LABELS[player.mode]} — explorer visible`);
     };
     const jump = () => {
-      if (player.onGround && !pausedRef.current) {
+      if (activeWorld.mode === "creative" && !pausedRef.current) {
+        player.velocity.y = 4.6;
+        player.onGround = false;
+      } else if (playerInWater && !pausedRef.current) {
+        player.velocity.y = 3.15;
+        player.onGround = false;
+      } else if (player.onGround && !pausedRef.current) {
         player.velocity.y = 7.1;
         player.onGround = false;
       }
@@ -519,10 +560,17 @@ export default function ShardsteadGame() {
 
     applyGraphicsRef.current = () => {
       const preset = qualityRef.current;
-      const maxRatio = preset === "low" ? 0.9 : preset === "balanced" ? 1.35 : 1.9;
+      const maxRatio = preset === "low" ? 0.85 : preset === "balanced" ? 1.3 : 1.8;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxRatio));
       renderer.shadowMap.enabled = preset !== "low";
+      renderer.shadowMap.type = preset === "high" ? THREE.VSMShadowMap : THREE.PCFSoftShadowMap;
+      renderer.toneMappingExposure = preset === "high" ? 1.14 : preset === "low" ? 0.98 : 1.06;
       sun.castShadow = preset !== "low";
+      sun.shadow.radius = preset === "high" ? 5 : 2;
+      bloom.strength = preset === "high" ? 0.48 : 0;
+      bloom.radius = preset === "high" ? 0.55 : 0;
+      waterMaterial.uniforms.uWaveStrength.value = preset === "low" ? 0.045 : preset === "high" ? 0.24 : 0.12;
+      waterMaterial.uniforms.uOpacity.value = preset === "low" ? 0.7 : 0.8;
       if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 1 / Math.max(30, renderDistanceRef.current * CHUNK_SIZE * 1.25);
     };
     applyGraphicsRef.current();
@@ -542,6 +590,7 @@ export default function ShardsteadGame() {
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       renderer.setSize(width, height, false);
+      composer.setSize(width, height);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
     };
@@ -556,7 +605,7 @@ export default function ShardsteadGame() {
     };
     const preventTouchPageMove = (event: TouchEvent) => event.preventDefault();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft"].includes(event.code)) keys.add(event.code);
+      if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "Space"].includes(event.code)) keys.add(event.code);
       if (event.code === "Space") { event.preventDefault(); jump(); }
       if (event.code === "KeyF" || event.code === "F5") { event.preventDefault(); updateCameraMode(); }
       if (event.code.startsWith("Digit")) {
@@ -610,6 +659,9 @@ export default function ShardsteadGame() {
       const dt = Math.min(0.05, clock.getDelta());
       const elapsed = clock.elapsedTime;
       let isMoving = false;
+      const currentOcean = oceanMeshes.has(chunkKey(Math.floor(player.position.x / CHUNK_SIZE), Math.floor(player.position.z / CHUNK_SIZE)));
+      const waterSurface = SEA_LEVEL + 0.42 + Math.sin(elapsed * 0.55) * 0.025;
+      playerInWater = currentOcean && player.position.y < waterSurface;
 
       if (!pausedRef.current) {
         const touch = moveInputRef.current;
@@ -620,7 +672,8 @@ export default function ShardsteadGame() {
         movement.copy(forward).multiplyScalar(forwardAmount).addScaledVector(right, sideAmount);
         if (movement.lengthSq() > 1) movement.normalize();
         isMoving = movement.lengthSq() > 0.01;
-        const distance = (keys.has("ShiftLeft") ? 7.1 : 4.5) * dt;
+        const creativeFlying = activeWorld.mode === "creative" && !playerInWater;
+        const distance = (playerInWater ? 2.75 : creativeFlying ? 7.5 : keys.has("ShiftLeft") ? 7.1 : 4.5) * dt;
         if (isMoving) {
           const nextX = player.position.clone();
           nextX.x += movement.x * distance;
@@ -631,7 +684,17 @@ export default function ShardsteadGame() {
         }
 
         const oldY = player.position.y;
-        player.velocity.y -= 18.5 * dt;
+        if (creativeFlying) {
+          const flightDirection = (keys.has("Space") ? 1 : 0) - (keys.has("ShiftLeft") ? 1 : 0);
+          player.velocity.y = THREE.MathUtils.lerp(player.velocity.y, flightDirection * 5.5, Math.min(1, dt * 8));
+          player.onGround = false;
+        } else if (playerInWater) {
+          const targetSink = keys.has("Space") ? 2.7 : -0.62;
+          player.velocity.y = THREE.MathUtils.lerp(player.velocity.y, targetSink, Math.min(1, dt * 3.2));
+          player.onGround = false;
+        } else {
+          player.velocity.y -= 18.5 * dt;
+        }
         const nextY = player.position.clone();
         nextY.y += player.velocity.y * dt;
         if (player.velocity.y > 0) {
@@ -707,7 +770,32 @@ export default function ShardsteadGame() {
         camera.lookAt(eye);
       }
 
-      for (const water of oceanMeshes.values()) water.position.y = SEA_LEVEL + 0.42 + Math.sin(elapsed * 0.55) * 0.025;
+      placementPreview.visible = false;
+      if (!pausedRef.current) {
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const previewHit = raycaster.intersectObjects(worldMeshes, false)[0];
+        if (previewHit && previewHit.instanceId !== undefined && previewHit.instanceId !== null) {
+          const block = (previewHit.object.userData.blocks as BlockCoord[])[previewHit.instanceId];
+          const normal = previewHit.face?.normal ?? new THREE.Vector3(0, 1, 0);
+          const px = block.x + Math.round(normal.x), py = block.y + Math.round(normal.y), pz = block.z + Math.round(normal.z);
+          placementPreview.position.set(px, py, pz);
+          const previous = world.get(blockKey(px, py, pz));
+          world.set(blockKey(px, py, pz), selectedRef.current);
+          const valid = !previous && !collidesAt(player.position);
+          if (previous) world.set(blockKey(px, py, pz), previous); else world.delete(blockKey(px, py, pz));
+          placementMaterial.color.set(valid ? 0x73e4c0 : 0xf18b70);
+          placementPreview.visible = true;
+        }
+      }
+
+      waterMaterial.uniforms.uTime.value = elapsed;
+      for (const water of oceanMeshes.values()) water.position.y = waterSurface;
+      const underwater = currentOcean && camera.position.y < waterSurface;
+      scene.background = new THREE.Color(underwater ? 0x164a55 : 0x8ab5b0);
+      if (scene.fog instanceof THREE.FogExp2) {
+        scene.fog.color.set(underwater ? 0x164a55 : 0x8ab5b0);
+        scene.fog.density = underwater ? 0.075 : 1 / Math.max(30, renderDistanceRef.current * CHUNK_SIZE * 1.25);
+      }
       sun.position.set(player.position.x + 24, 24 + Math.sin(elapsed / 30) * 8, player.position.z + 14);
       sun.target.position.copy(player.position);
       const dayCycle = (elapsed / 190) % 1;
@@ -723,7 +811,7 @@ export default function ShardsteadGame() {
       if (coordsRef.current) coordsRef.current.textContent = `X ${Math.floor(player.position.x)} · Z ${Math.floor(player.position.z)}`;
       autosaveTimer += dt;
       if (autosaveTimer > 20) { saveWorld(); autosaveTimer = 0; }
-      renderer.render(scene, camera);
+      if (qualityRef.current === "high") composer.render(); else renderer.render(scene, camera);
     };
     animate();
 
@@ -745,7 +833,11 @@ export default function ShardsteadGame() {
       canvas.removeEventListener("mousedown", onMouseDown);
       canvas.removeEventListener("contextmenu", onContextMenu);
       renderer.dispose();
+      composer.dispose();
+      waterMaterial.dispose();
       cubeGeometry.dispose();
+      placementPreview.geometry.dispose();
+      placementMaterial.dispose();
       Object.values(textures).forEach((texture) => texture.dispose());
       mount.removeChild(canvas);
       canvasRef.current = null;
@@ -806,7 +898,7 @@ export default function ShardsteadGame() {
   if (!activeWorld) return (
     <main className="home-screen">
       <section className="home-panel">
-        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 003 · ENDLESS FRONTIER</p><h1>SHARDSTEAD</h1>
+        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 004 · TIDEBORN</p><h1>SHARDSTEAD</h1>
         <p className="tagline">Choose a world. Keep every frontier.</p>
         {creating ? <div className="world-creator">
           <label>World name<input value={newWorldName} maxLength={30} onChange={(e) => setNewWorldName(e.target.value)} /></label>
@@ -836,10 +928,6 @@ export default function ShardsteadGame() {
         </div>
         <button className="hud-button" type="button" onClick={() => { setPaused(true); setSettingsOpen(true); if (document.pointerLockElement) document.exitPointerLock(); }} aria-label="Open settings">SETTINGS</button>
       </header>
-      <aside className="objective-card">
-        <span className="eyebrow">WILDFRONT AWAKENING</span><strong>Explore beyond the World Core</strong><p>{message}</p>
-        <div className="objective-progress"><span style={{ width: `${Math.min(100, 28 + shards * 12)}%` }} /></div><small>{shards} rift shards recovered</small>
-      </aside>
       <div className="camera-chip">{CAMERA_LABELS[cameraMode]} · {mobile ? "CAM" : "F5"}</div>
       <div className="crosshair" aria-hidden="true"><i /><i /></div>
       <nav className="hotbar" aria-label="Building materials">
@@ -875,13 +963,13 @@ export default function ShardsteadGame() {
       {intro && (
         <section className="entry-screen" aria-labelledby="game-title">
           <div className="entry-panel"><div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">{activeWorld.mode.toUpperCase()} WORLD</p><h1 id="game-title">{activeWorld.name}</h1><p className="tagline">The frontier grows with every step.</p><p className="entry-copy">Regional oceans, endless chunk streaming, structures, creatures, mining, building, and device-local saves.</p><button type="button" className="primary-button" onClick={begin}>ENTER WORLD</button><span className="input-note">{mobile ? "Touch controls enabled · rotate any time" : "Keyboard + mouse · Click to capture cursor"}</span></div>
-          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 003</div>
+          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 004</div>
         </section>
       )}
       {!intro && paused && (
         <section className="pause-screen" aria-label={settingsOpen ? "Settings" : "Game paused"}>
           <div className="pause-panel">
-            {settingsOpen ? <><p className="eyebrow">DISPLAY & PERFORMANCE</p><h2>Render settings</h2><div className="setting-group"><label>Graphics preset</label><div className="segmented">{(["low", "balanced", "high"] as Quality[]).map((preset) => <button type="button" key={preset} className={quality === preset ? "active" : ""} onClick={() => setQuality(preset)}>{preset}</button>)}</div></div><div className="setting-group"><label htmlFor="render-distance">Chunk distance <strong>{renderDistance} chunks</strong></label><input id="render-distance" type="range" min="1" max="5" step="1" value={renderDistance} onChange={(event) => setRenderDistance(Number(event.target.value))} /></div><p className="setting-help">The world now generates exactly to this chunk radius. Higher settings load substantially more 3D terrain.</p><div className="pause-actions"><button type="button" className="primary-button" onClick={resume}>APPLY & RETURN</button><button type="button" className="danger-button" onClick={resetWorld}>RESET WORLD</button></div></> : <><p className="eyebrow">FRONTIER PAUSED</p><h2>{activeWorld.name}</h2><p>Your position, inventory, and every block change are saved locally.</p><button type="button" className="primary-button" onClick={resume}>RESUME</button><button type="button" className="text-button" onClick={() => setInventoryOpen(true)}>INVENTORY</button><button type="button" className="text-button" onClick={() => setSettingsOpen(true)}>RENDER SETTINGS</button><button type="button" className="text-button" onClick={() => { setActiveWorld(null); setPaused(true); }}>SAVE & QUIT TO WORLDS</button></>}
+            {settingsOpen ? <><p className="eyebrow">DISPLAY & PERFORMANCE</p><h2>Render settings</h2><div className="setting-group"><label>Graphics preset</label><div className="segmented">{(["low", "balanced", "high"] as Quality[]).map((preset) => <button type="button" key={preset} className={quality === preset ? "active" : ""} onClick={() => setQuality(preset)}>{preset === "high" ? "Cinematic" : preset}</button>)}</div></div><div className="setting-group"><label htmlFor="render-distance">Chunk distance <strong>{renderDistance} chunks</strong></label><input id="render-distance" type="range" min="1" max="5" step="1" value={renderDistance} onChange={(event) => setRenderDistance(Number(event.target.value))} /></div><p className="setting-help">Cinematic enables PBR materials, ACES color, soft high-quality shadows, stronger water displacement, and bloom. It creates a ray-traced-style look without claiming unsupported hardware ray tracing on mobile browsers.</p><div className="pause-actions"><button type="button" className="primary-button" onClick={resume}>APPLY & RETURN</button><button type="button" className="danger-button" onClick={resetWorld}>RESET WORLD</button></div></> : <><p className="eyebrow">FRONTIER PAUSED</p><h2>{activeWorld.name}</h2><p>Your position, inventory, and every block change are saved locally.</p><button type="button" className="primary-button" onClick={resume}>RESUME</button><button type="button" className="text-button" onClick={() => setInventoryOpen(true)}>INVENTORY</button><button type="button" className="text-button" onClick={() => setSettingsOpen(true)}>RENDER SETTINGS</button><button type="button" className="text-button" onClick={() => { setActiveWorld(null); setPaused(true); }}>SAVE & QUIT TO WORLDS</button></>}
           </div>
         </section>
       )}
