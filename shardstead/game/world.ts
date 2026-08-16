@@ -61,12 +61,21 @@ export function biomeAt(x: number, z: number): Biome {
 
 export function terrainHeight(x: number, z: number) {
   if (Math.abs(x) <= 7 && Math.abs(z) <= 7) return 3;
-  const continent = valueNoise(x, z, 78, 11) * 2 - 1;
+  const continent = valueNoise(x, z, 128, 11) * 2 - 1;
   const hills = valueNoise(x, z, 29, 47) * 2 - 1;
   const detail = valueNoise(x, z, 11, 83) * 2 - 1;
   const ridge = Math.abs(valueNoise(x, z, 52, 207) * 2 - 1);
-  const height = 4.2 + continent * 4.2 + hills * 2.5 + detail * 0.8 + ridge * 1.4;
-  return Math.max(-1, Math.min(13, Math.floor(height)));
+  const oceanBasin = continent < -0.28 ? (continent + 0.28) * 8 : 0;
+  const height = 4.2 + continent * 4.8 + oceanBasin + hills * 2.2 + detail * 0.7 + ridge * 1.2;
+  return Math.max(-3, Math.min(13, Math.floor(height)));
+}
+
+export function isOceanChunk(chunkX: number, chunkZ: number) {
+  const sx = chunkX * CHUNK_SIZE;
+  const sz = chunkZ * CHUNK_SIZE;
+  let low = 0;
+  for (const [ox, oz] of [[1, 1], [5, 1], [1, 5], [5, 5], [8, 8]]) if (terrainHeight(sx + ox, sz + oz) < SEA_LEVEL) low += 1;
+  return low >= 2;
 }
 
 function setBlock(
@@ -192,7 +201,7 @@ export function generateChunk(
     for (let z = startZ; z < startZ + CHUNK_SIZE; z += 1) {
       const height = terrainHeight(x, z);
       const biome = biomeAt(x, z);
-      for (let y = -3; y <= height; y += 1) {
+      for (let y = Math.max(-3, height - 3); y <= height; y += 1) {
         let type: BlockType = "stone";
         if (y === height) type = biome === "shore" ? "sand" : biome === "highland" ? "snow" : biome === "rift" ? "dark" : "grass";
         else if (y >= height - 2) type = biome === "shore" ? "sand" : biome === "rift" ? "dark" : "soil";

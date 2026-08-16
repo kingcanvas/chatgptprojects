@@ -6,6 +6,7 @@ export type PlayerRig = {
   rightArm: THREE.Group;
   leftLeg: THREE.Group;
   rightLeg: THREE.Group;
+  firstPersonArm: THREE.Group;
 };
 
 export type Mossback = {
@@ -54,7 +55,9 @@ export function createPlayerRig(loader: THREE.TextureLoader, renderer: THREE.Web
   body.receiveShadow = true;
   root.add(body);
 
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.56, 0.56), [face, face, face, face, face, face]);
+  const skin = new THREE.MeshLambertMaterial({ color: 0xc98e67 });
+  const hair = new THREE.MeshLambertMaterial({ color: 0x202823 });
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.54, 0.5), [hair, hair, hair, skin, face, hair]);
   head.position.y = 1.68;
   head.castShadow = true;
   root.add(head);
@@ -83,7 +86,21 @@ export function createPlayerRig(loader: THREE.TextureLoader, renderer: THREE.Web
   pendant.castShadow = true;
   root.add(pendant);
 
-  return { root, leftArm, rightArm, leftLeg, rightLeg };
+  const hairCrown = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.16, 0.55), hair);
+  hairCrown.position.set(0, 1.98, -0.01); hairCrown.castShadow = true; root.add(hairCrown);
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.58, 0.2), gear);
+  pack.position.set(0, 1.1, -0.28); pack.castShadow = true; root.add(pack);
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.12, 0.38), gear);
+  belt.position.set(0, 0.72, 0); root.add(belt);
+
+  const firstPersonArm = new THREE.Group();
+  const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.72, 0.25), cloth);
+  sleeve.position.y = -0.36; sleeve.rotation.x = -0.16; firstPersonArm.add(sleeve);
+  const glove = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.27), gear);
+  glove.position.y = -0.78; firstPersonArm.add(glove);
+  firstPersonArm.position.set(0.52, -0.38, -0.72);
+
+  return { root, leftArm, rightArm, leftLeg, rightLeg, firstPersonArm };
 }
 
 export function createMossback(

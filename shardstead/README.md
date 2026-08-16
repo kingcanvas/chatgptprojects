@@ -1,6 +1,6 @@
 # Shardstead
 
-Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Wildfront (Build 002)**.
+Shardstead is an original 3D open-world building game in development for desktop and mobile browsers. The current playable milestone is **Worldkeeper (Build 003)**.
 
 ## Play now
 
@@ -12,16 +12,21 @@ The same link works on desktop and mobile. Progress is saved locally in that bro
 
 - Procedurally generated voxel frontier with terrain, trees, shoreline, ore, and ruins
 - Endless chunk streaming: new deterministic terrain generates as the player travels
+- A true chunk-radius setting that controls generated terrain and persists between visits
+- A multi-world home screen with create, load, delete, Survival, and Creative modes
+- Persistent per-world player position, block edits, shards, game mode, and inventory
+- A real inventory with code-rendered 3D block previews and Survival quantities
+- Regional coastlines and oceans instead of a global water sheet beneath the world
 - Meadows, forests, highlands, shores, rift regions, ruins, watchtowers, and rift arches
 - A glowing World Core landmark and first shard-recovery objective
 - Mine blocks, collect rift shards, select materials, and place new blocks
 - Desktop controls: WASD, mouse look, Space, Shift, number keys, left/right click, and F5/F camera cycling
 - Mobile controls: virtual movement stick, drag-to-look, mine, build, jump, and camera buttons
 - First-person, third-person, and front-facing camera modes
-- An original textured explorer character visible in third-person and front view
+- A rebuilt original explorer with hair, armor, pack, belt, first-person arm, and action animations
 - Wandering original Mossback creatures that can be encountered and attacked
 - Solid player collision with terrain, structures, trees, placed blocks, walls, and ceilings
-- Stable portrait/landscape iPhone layout with touch hitboxes locked to their visible buttons
+- Standalone iPhone Home Screen support with safe-area-aware landscape controls and aligned hitboxes
 - Low, Balanced, and High graphics presets plus adjustable view distance
 - Device-local world and player saving
 - Original hand-painted textures generated specifically for Shardstead

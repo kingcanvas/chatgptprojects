@@ -9,6 +9,7 @@ import {
   chunkKey,
   generateChunk,
   hash2,
+  isOceanChunk,
   SEA_LEVEL,
   terrainHeight,
   type BlockCoord,
@@ -17,6 +18,9 @@ import {
 
 type CameraMode = "first" | "third" | "front";
 type Quality = "low" | "balanced" | "high";
+type GameMode = "survival" | "creative";
+type WorldMeta = { id: string; name: string; mode: GameMode; createdAt: number; updatedAt: number };
+type Inventory = Partial<Record<BlockType, number>>;
 type GameActions = {
   mine: () => void;
   place: () => void;
@@ -25,7 +29,9 @@ type GameActions = {
   look: (dx: number, dy: number) => void;
 };
 
-const SAVE_KEY = "shardstead:streaming-world:v2";
+const WORLDS_KEY = "shardstead:worlds:v1";
+const SETTINGS_KEY = "shardstead:settings:v1";
+const saveKey = (id: string) => `shardstead:world:${id}:v3`;
 const texturePath = (name: string) => `/textures/${name}.png`;
 const CAMERA_LABELS: Record<CameraMode, string> = {
   first: "First person",
@@ -60,13 +66,33 @@ function isTouchDevice() {
   return typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 }
 
+function ItemCube({ texture }: { texture: string }) {
+  return <span className="item-cube" style={{ "--texture": `url(${texture})` } as React.CSSProperties}>{["front", "back", "right", "left", "top", "bottom"].map((face) => <i key={face} className={face} />)}</span>;
+}
+
+function loadWorlds(): WorldMeta[] {
+  if (typeof window === "undefined") return [];
+  try {
+    let list = JSON.parse(localStorage.getItem(WORLDS_KEY) ?? "[]") as WorldMeta[];
+    const legacy = localStorage.getItem("shardstead:streaming-world:v2");
+    if (!list.length && legacy) {
+      const meta: WorldMeta = { id: "legacy-wildfront", name: "Wildfront", mode: "survival", createdAt: Date.now(), updatedAt: Date.now() };
+      localStorage.setItem(saveKey(meta.id), JSON.stringify({ ...JSON.parse(legacy), inventory: { grass: 24, stone: 18, wood: 12, crystal: 3, metal: 6 } }));
+      list = [meta]; localStorage.setItem(WORLDS_KEY, JSON.stringify(list));
+    }
+    return list;
+  } catch { return []; }
+}
+
 export default function ShardsteadGame() {
   const mountRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const selectedRef = useRef<BlockType>("grass");
   const pausedRef = useRef(true);
   const qualityRef = useRef<Quality>("balanced");
-  const renderDistanceRef = useRef(62);
+  const renderDistanceRef = useRef(2);
+  const inventoryRef = useRef<Inventory>({});
+  const modeRef = useRef<GameMode>("survival");
   const applyGraphicsRef = useRef<() => void>(() => undefined);
   const moveInputRef = useRef({ x: 0, y: 0 });
   const dayRef = useRef<HTMLSpanElement>(null);
@@ -79,22 +105,43 @@ export default function ShardsteadGame() {
     look: () => undefined,
   });
 
+  const [worlds, setWorlds] = useState<WorldMeta[]>([]);
+  const [activeWorld, setActiveWorld] = useState<WorldMeta | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newWorldName, setNewWorldName] = useState("New Frontier");
+  const [newMode, setNewMode] = useState<GameMode>("survival");
   const [intro, setIntro] = useState(true);
   const [paused, setPaused] = useState(true);
   const [locked, setLocked] = useState(false);
   const [selected, setSelected] = useState<BlockType>("grass");
   const [cameraMode, setCameraMode] = useState<CameraMode>("first");
-  const [quality, setQuality] = useState<Quality>("balanced");
-  const [renderDistance, setRenderDistance] = useState(62);
+  const [quality, setQuality] = useState<Quality>(() => { try { return typeof window === "undefined" ? "balanced" : JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").quality ?? "balanced"; } catch { return "balanced"; } });
+  const [renderDistance, setRenderDistance] = useState(() => { try { return typeof window === "undefined" ? 2 : JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").renderChunks ?? 2; } catch { return 2; } });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [inventory, setInventory] = useState<Inventory>({});
   const [shards, setShards] = useState(0);
   const [message, setMessage] = useState("Find the glowing World Core");
   const [mobile] = useState(() => isTouchDevice());
+  useEffect(() => { const timer = window.setTimeout(() => setWorlds(loadWorlds()), 0); return () => window.clearTimeout(timer); }, []);
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { qualityRef.current = quality; applyGraphicsRef.current(); }, [quality]);
   useEffect(() => { renderDistanceRef.current = renderDistance; applyGraphicsRef.current(); }, [renderDistance]);
+  useEffect(() => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ quality, renderChunks: renderDistance })); } catch {} }, [quality, renderDistance]);
+
+  const createWorld = () => {
+    const meta: WorldMeta = { id: crypto.randomUUID(), name: newWorldName.trim() || "New Frontier", mode: newMode, createdAt: Date.now(), updatedAt: Date.now() };
+    const next = [meta, ...worlds];
+    localStorage.setItem(WORLDS_KEY, JSON.stringify(next));
+    setWorlds(next); setActiveWorld(meta); setCreating(false); setIntro(true);
+  };
+  const deleteWorld = (world: WorldMeta) => {
+    if (!window.confirm(`Delete ${world.name}? This cannot be undone.`)) return;
+    const next = worlds.filter((item) => item.id !== world.id);
+    localStorage.removeItem(saveKey(world.id)); localStorage.setItem(WORLDS_KEY, JSON.stringify(next)); setWorlds(next);
+  };
 
   const begin = useCallback(() => {
     setIntro(false);
@@ -104,7 +151,8 @@ export default function ShardsteadGame() {
 
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount) return;
+    if (!mount || !activeWorld) return;
+    modeRef.current = activeWorld.mode;
 
     const canvas = document.createElement("canvas");
     canvas.className = "game-canvas";
@@ -177,24 +225,28 @@ export default function ShardsteadGame() {
     let restoredPosition: [number, number, number] | null = null;
     let restoredYaw = 0;
     let restoredShards = 0;
+    inventoryRef.current = activeWorld.mode === "creative" ? {} : { grass: 24, stone: 18, wood: 12, crystal: 3, metal: 6 };
     try {
-      const raw = window.localStorage.getItem(SAVE_KEY);
+      const raw = window.localStorage.getItem(saveKey(activeWorld.id));
       if (raw) {
         const save = JSON.parse(raw) as {
           edits?: [string, BlockType | null][];
           position?: [number, number, number];
           yaw?: number;
           shards?: number;
+          inventory?: Inventory;
         };
         if (Array.isArray(save.edits)) for (const [key, value] of save.edits) edits.set(key, value);
         if (Array.isArray(save.position) && save.position.length === 3) restoredPosition = save.position;
         if (typeof save.yaw === "number") restoredYaw = save.yaw;
         if (typeof save.shards === "number") restoredShards = save.shards;
+        inventoryRef.current = save.inventory ?? { grass: 24, stone: 18, wood: 12, crystal: 3, metal: 6 };
       }
     } catch {
-      window.localStorage.removeItem(SAVE_KEY);
+      window.localStorage.removeItem(saveKey(activeWorld.id));
     }
     setShards(restoredShards);
+    setInventory({ ...inventoryRef.current });
 
     const player = {
       position: new THREE.Vector3(...(restoredPosition ?? [0, terrainHeight(0, 9) + 0.52, 9])),
@@ -206,6 +258,8 @@ export default function ShardsteadGame() {
     };
     const playerRig = createPlayerRig(textureLoader, renderer);
     scene.add(playerRig.root);
+    camera.add(playerRig.firstPersonArm);
+    scene.add(camera);
 
     const world = new Map<string, BlockType>();
     const loadedChunks = new Map<string, string[]>();
@@ -216,6 +270,8 @@ export default function ShardsteadGame() {
     const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
     const matrix = new THREE.Matrix4();
     const worldMeshes: THREE.InstancedMesh[] = [];
+    const oceanMeshes = new Map<string, THREE.Mesh>();
+    const waterMaterial = new THREE.MeshPhongMaterial({ map: textures.water, color: 0x67b9c8, transparent: true, opacity: 0.74, shininess: 92, side: THREE.DoubleSide });
 
     const rebuildMeshes = () => {
       for (const mesh of worldMeshes) worldGroup.remove(mesh);
@@ -257,7 +313,7 @@ export default function ShardsteadGame() {
     const streamWorld = (force = false) => {
       const centerX = Math.floor(player.position.x / CHUNK_SIZE);
       const centerZ = Math.floor(player.position.z / CHUNK_SIZE);
-      const radius = isTouchDevice() ? 1 : Math.max(1, Math.min(3, Math.ceil(renderDistanceRef.current / 38)));
+      const radius = renderDistanceRef.current;
       const wanted = new Set<string>();
       let changed = false;
       for (let cx = centerX - radius; cx <= centerX + radius; cx += 1) {
@@ -266,6 +322,12 @@ export default function ShardsteadGame() {
           wanted.add(key);
           if (!loadedChunks.has(key)) {
             loadedChunks.set(key, generateChunk(cx, cz, world, edits));
+            if (isOceanChunk(cx, cz)) {
+              const water = new THREE.Mesh(new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE), waterMaterial);
+              water.rotation.x = -Math.PI / 2;
+              water.position.set(cx * CHUNK_SIZE + CHUNK_SIZE / 2 - 0.5, SEA_LEVEL + 0.42, cz * CHUNK_SIZE + CHUNK_SIZE / 2 - 0.5);
+              water.receiveShadow = true; oceanMeshes.set(key, water); worldGroup.add(water);
+            }
             spawnCreatureForChunk(cx, cz);
             changed = true;
           }
@@ -276,6 +338,8 @@ export default function ShardsteadGame() {
         if (Math.abs(cx - centerX) <= radius + 1 && Math.abs(cz - centerZ) <= radius + 1) continue;
         for (const worldKey of keys) world.delete(worldKey);
         loadedChunks.delete(key);
+        const ocean = oceanMeshes.get(key);
+        if (ocean) { worldGroup.remove(ocean); ocean.geometry.dispose(); oceanMeshes.delete(key); }
         const creature = creatures.get(key);
         if (creature) {
           creatureGroup.remove(creature.root);
@@ -287,20 +351,6 @@ export default function ShardsteadGame() {
     };
     streamWorld(true);
 
-    textures.water.repeat.set(24, 24);
-    const waterMaterial = new THREE.MeshPhongMaterial({
-      map: textures.water,
-      color: 0x67b9c8,
-      transparent: true,
-      opacity: 0.74,
-      shininess: 92,
-      side: THREE.DoubleSide,
-    });
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(150, 150), waterMaterial);
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = SEA_LEVEL + 0.42;
-    water.receiveShadow = true;
-    scene.add(water);
     const coreLight = new THREE.PointLight(0x48e5c2, 12, 17, 2);
     coreLight.position.set(0, 7.3, 0);
     scene.add(coreLight);
@@ -352,11 +402,12 @@ export default function ShardsteadGame() {
 
     const saveWorld = () => {
       try {
-        window.localStorage.setItem(SAVE_KEY, JSON.stringify({
+        window.localStorage.setItem(saveKey(activeWorld.id), JSON.stringify({
           edits: Array.from(edits.entries()),
           position: player.position.toArray(),
           yaw: player.yaw,
           shards: restoredShards,
+          inventory: inventoryRef.current,
         }));
       } catch {
         setMessage("Local save is full — keep exploring for now");
@@ -401,6 +452,7 @@ export default function ShardsteadGame() {
 
     const interact = (placing: boolean) => {
       if (pausedRef.current) return;
+      swingUntil = clock.elapsedTime + 0.22;
       raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
       if (!placing) {
         const creatureHit = raycaster.intersectObject(creatureGroup, true)[0];
@@ -424,6 +476,10 @@ export default function ShardsteadGame() {
         const key = blockKey(block.x, block.y, block.z);
         world.delete(key);
         edits.set(key, null);
+        if (activeWorld.mode === "survival") {
+          inventoryRef.current[block.type] = (inventoryRef.current[block.type] ?? 0) + 1;
+          setInventory({ ...inventoryRef.current });
+        }
         swingUntil = clock.elapsedTime + 0.22;
         if (block.type === "crystal") {
           restoredShards += 1;
@@ -431,6 +487,9 @@ export default function ShardsteadGame() {
           setMessage("Rift shard recovered");
         } else setMessage(`${BLOCK_LABELS[block.type]} collected`);
       } else {
+        if (activeWorld.mode === "survival" && (inventoryRef.current[selectedRef.current] ?? 0) <= 0) {
+          setMessage(`No ${BLOCK_LABELS[selectedRef.current]} in inventory`); return;
+        }
         const normal = hit.face?.normal ?? new THREE.Vector3(0, 1, 0);
         const x = block.x + Math.round(normal.x);
         const y = block.y + Math.round(normal.y);
@@ -444,6 +503,10 @@ export default function ShardsteadGame() {
           return;
         }
         edits.set(key, selectedRef.current);
+        if (activeWorld.mode === "survival") {
+          inventoryRef.current[selectedRef.current] = Math.max(0, (inventoryRef.current[selectedRef.current] ?? 0) - 1);
+          setInventory({ ...inventoryRef.current });
+        }
         const ownerChunk = chunkKey(Math.floor(x / CHUNK_SIZE), Math.floor(z / CHUNK_SIZE));
         const chunkKeys = loadedChunks.get(ownerChunk);
         if (chunkKeys && !chunkKeys.includes(key)) chunkKeys.push(key);
@@ -460,7 +523,7 @@ export default function ShardsteadGame() {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxRatio));
       renderer.shadowMap.enabled = preset !== "low";
       sun.castShadow = preset !== "low";
-      if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 1 / Math.max(34, renderDistanceRef.current * 1.22);
+      if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 1 / Math.max(30, renderDistanceRef.current * CHUNK_SIZE * 1.25);
     };
     applyGraphicsRef.current();
 
@@ -468,9 +531,10 @@ export default function ShardsteadGame() {
     let orientationTimer = 0;
     const applySize = () => {
       resizeFrame = 0;
-      const viewport = window.visualViewport;
-      const width = Math.max(1, Math.round(viewport?.width ?? window.innerWidth));
-      const height = Math.max(1, Math.round(viewport?.height ?? window.innerHeight));
+      const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+      const viewport = standalone ? null : window.visualViewport;
+      const width = Math.max(1, Math.round(standalone ? document.documentElement.clientWidth : (viewport?.width ?? window.innerWidth)));
+      const height = Math.max(1, Math.round(standalone ? document.documentElement.clientHeight : (viewport?.height ?? window.innerHeight)));
       document.documentElement.style.setProperty("--game-width", `${width}px`);
       document.documentElement.style.setProperty("--game-height", `${height}px`);
       mount.style.width = `${width}px`;
@@ -500,6 +564,7 @@ export default function ShardsteadGame() {
         if (HOTBAR[slot]) setSelected(HOTBAR[slot].type);
       }
       if (event.code === "Escape") { setPaused(true); setSettingsOpen(false); }
+      if (event.code === "KeyE") { setInventoryOpen((open) => !open); setPaused(true); }
     };
     const onKeyUp = (event: KeyboardEvent) => keys.delete(event.code);
     const onMouseMove = (event: MouseEvent) => {
@@ -611,6 +676,7 @@ export default function ShardsteadGame() {
       }
 
       playerRig.root.visible = player.mode !== "first";
+      playerRig.firstPersonArm.visible = player.mode === "first";
       playerRig.root.position.copy(player.position);
       playerRig.root.rotation.y = player.yaw;
       const walk = isMoving && player.onGround ? Math.sin(elapsed * 9.5) * 0.65 : 0;
@@ -618,6 +684,9 @@ export default function ShardsteadGame() {
       playerRig.rightLeg.rotation.x = -walk;
       playerRig.leftArm.rotation.x = -walk * 0.8;
       playerRig.rightArm.rotation.x = elapsed < swingUntil ? -1.5 : walk * 0.8;
+      const actionPhase = elapsed < swingUntil ? Math.sin(((swingUntil - elapsed) / 0.22) * Math.PI) : 0;
+      playerRig.firstPersonArm.rotation.x = -0.22 - actionPhase * 1.15;
+      playerRig.firstPersonArm.rotation.z = -0.12 - actionPhase * 0.35;
 
       const lookDirection = new THREE.Vector3(
         -Math.sin(player.yaw) * Math.cos(player.pitch),
@@ -638,9 +707,7 @@ export default function ShardsteadGame() {
         camera.lookAt(eye);
       }
 
-      water.position.x = Math.round(player.position.x / 30) * 30;
-      water.position.z = Math.round(player.position.z / 30) * 30;
-      water.position.y = SEA_LEVEL + 0.42 + Math.sin(elapsed * 0.55) * 0.025;
+      for (const water of oceanMeshes.values()) water.position.y = SEA_LEVEL + 0.42 + Math.sin(elapsed * 0.55) * 0.025;
       sun.position.set(player.position.x + 24, 24 + Math.sin(elapsed / 30) * 8, player.position.z + 14);
       sun.target.position.copy(player.position);
       const dayCycle = (elapsed / 190) % 1;
@@ -683,7 +750,7 @@ export default function ShardsteadGame() {
       mount.removeChild(canvas);
       canvasRef.current = null;
     };
-  }, []);
+  }, [activeWorld]);
 
   const stopTouch = (event: React.PointerEvent<HTMLElement>) => {
     event.preventDefault();
@@ -732,9 +799,26 @@ export default function ShardsteadGame() {
     if (!mobile) canvasRef.current?.requestPointerLock?.();
   };
   const resetWorld = () => {
-    window.localStorage.removeItem(SAVE_KEY);
+    if (activeWorld) window.localStorage.removeItem(saveKey(activeWorld.id));
     window.location.reload();
   };
+
+  if (!activeWorld) return (
+    <main className="home-screen">
+      <section className="home-panel">
+        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 003 · ENDLESS FRONTIER</p><h1>SHARDSTEAD</h1>
+        <p className="tagline">Choose a world. Keep every frontier.</p>
+        {creating ? <div className="world-creator">
+          <label>World name<input value={newWorldName} maxLength={30} onChange={(e) => setNewWorldName(e.target.value)} /></label>
+          <div className="mode-picker">{(["survival", "creative"] as GameMode[]).map((mode) => <button type="button" key={mode} className={newMode === mode ? "active" : ""} onClick={() => setNewMode(mode)}><strong>{mode}</strong><small>{mode === "survival" ? "Gather blocks and manage supplies" : "Unlimited building materials"}</small></button>)}</div>
+          <div className="home-actions"><button type="button" className="text-button" onClick={() => setCreating(false)}>CANCEL</button><button type="button" className="primary-button" onClick={createWorld}>CREATE WORLD</button></div>
+        </div> : <>
+          <div className="world-list">{worlds.length ? worlds.map((world) => <article className="world-card" key={world.id}><div><strong>{world.name}</strong><span>{world.mode} · {new Date(world.updatedAt).toLocaleDateString()}</span></div><button type="button" className="primary-button" onClick={() => { setActiveWorld(world); setIntro(true); }}>LOAD</button><button type="button" className="danger-button" onClick={() => deleteWorld(world)}>DELETE</button></article>) : <p className="empty-worlds">No saved worlds yet. Create your first frontier.</p>}</div>
+          <button type="button" className="primary-button new-world-button" onClick={() => setCreating(true)}>+ NEW WORLD</button>
+        </>}
+      </section>
+    </main>
+  );
 
   return (
     <main className="game-shell">
@@ -744,7 +828,7 @@ export default function ShardsteadGame() {
       <header className="top-hud">
         <div className="brand-lockup" aria-label="Shardstead">
           <span className="brand-rune">S</span>
-          <span><strong>SHARDSTEAD</strong><small>WILDFRONT · BUILD 002</small></span>
+          <span><strong>SHARDSTEAD</strong><small>{activeWorld.name.toUpperCase()} · {activeWorld.mode.toUpperCase()}</small></span>
         </div>
         <div className="world-readout">
           <span className="signal-dot" /><span>INFINITE FRONTIER</span><span className="divider" />
@@ -769,12 +853,13 @@ export default function ShardsteadGame() {
             aria-pressed={selected === item.type}
           >
             <span className="slot-number">{index + 1}</span>
-            <span className="block-swatch" style={{ "--texture": `url(${item.texture})` } as React.CSSProperties} />
+            <ItemCube texture={item.texture} />
+            <span className="item-count">{activeWorld.mode === "creative" ? "∞" : inventory[item.type] ?? 0}</span>
             <span className="slot-label">{BLOCK_LABELS[item.type]}</span>
           </button>
         ))}
       </nav>
-      <div className="desktop-help"><span>WASD MOVE</span><span>SPACE JUMP</span><span>LEFT ATTACK / MINE</span><span>RIGHT BUILD</span><span>F5 CAMERA</span></div>
+      <div className="desktop-help"><span>WASD MOVE</span><span>SPACE JUMP</span><span>E INVENTORY</span><span>LEFT ATTACK / MINE</span><span>RIGHT BUILD</span><span>F5 CAMERA</span></div>
       <div className="mobile-controls" aria-label="Touch controls">
         <div className="move-pad" onPointerDown={handleMove} onPointerMove={handleMove} onPointerUp={handleMove} onPointerCancel={handleMove} aria-label="Move joystick"><span /></div>
         <div className="look-zone" onPointerDown={handleLookStart} onPointerMove={handleLookMove} aria-label="Drag to look" />
@@ -784,21 +869,23 @@ export default function ShardsteadGame() {
               <span className={`control-icon icon-${action}`} aria-hidden="true" /><small>{action === "mine" ? "ATTACK" : action === "place" ? "BUILD" : action.toUpperCase()}</small>
             </button>
           ))}
+          <button type="button" onPointerDown={(event) => { stopTouch(event); setInventoryOpen(true); setPaused(true); }} aria-label="inventory"><ItemCube texture="/textures/core-metal.png" /><small>PACK</small></button>
         </div>
       </div>
       {intro && (
         <section className="entry-screen" aria-labelledby="game-title">
-          <div className="entry-panel"><div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">AN ENDLESS BUILDING ADVENTURE</p><h1 id="game-title">SHARDSTEAD</h1><p className="tagline">The frontier now grows with every step.</p><p className="entry-copy">Explore streaming landscapes, discover ruins and watchtowers, meet wild Mossbacks, and build anywhere. Your explorer and world changes save on this device.</p><button type="button" className="primary-button" onClick={begin}>ENTER THE WILDFRONT</button><span className="input-note">{mobile ? "Touch controls enabled · rotate any time" : "Keyboard + mouse · Click to capture cursor"}</span></div>
-          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 002</div>
+          <div className="entry-panel"><div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">{activeWorld.mode.toUpperCase()} WORLD</p><h1 id="game-title">{activeWorld.name}</h1><p className="tagline">The frontier grows with every step.</p><p className="entry-copy">Regional oceans, endless chunk streaming, structures, creatures, mining, building, and device-local saves.</p><button type="button" className="primary-button" onClick={begin}>ENTER WORLD</button><span className="input-note">{mobile ? "Touch controls enabled · rotate any time" : "Keyboard + mouse · Click to capture cursor"}</span></div>
+          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 003</div>
         </section>
       )}
       {!intro && paused && (
         <section className="pause-screen" aria-label={settingsOpen ? "Settings" : "Game paused"}>
           <div className="pause-panel">
-            {settingsOpen ? <><p className="eyebrow">DISPLAY & PERFORMANCE</p><h2>Render settings</h2><div className="setting-group"><label>Graphics preset</label><div className="segmented">{(["low", "balanced", "high"] as Quality[]).map((preset) => <button type="button" key={preset} className={quality === preset ? "active" : ""} onClick={() => setQuality(preset)}>{preset}</button>)}</div></div><div className="setting-group"><label htmlFor="render-distance">View distance <strong>{renderDistance}m</strong></label><input id="render-distance" type="range" min="34" max="96" step="2" value={renderDistance} onChange={(event) => setRenderDistance(Number(event.target.value))} /></div><p className="setting-help">Mobile streams a compact chunk ring for stable performance. Desktop loads farther terrain as view distance increases.</p><div className="pause-actions"><button type="button" className="primary-button" onClick={resume}>APPLY & RETURN</button><button type="button" className="danger-button" onClick={resetWorld}>RESET WORLD</button></div></> : <><p className="eyebrow">FRONTIER PAUSED</p><h2>Return to Shardstead</h2><p>Your position and every block change are saved locally.</p><button type="button" className="primary-button" onClick={resume}>RESUME</button><button type="button" className="text-button" onClick={() => setSettingsOpen(true)}>RENDER SETTINGS</button></>}
+            {settingsOpen ? <><p className="eyebrow">DISPLAY & PERFORMANCE</p><h2>Render settings</h2><div className="setting-group"><label>Graphics preset</label><div className="segmented">{(["low", "balanced", "high"] as Quality[]).map((preset) => <button type="button" key={preset} className={quality === preset ? "active" : ""} onClick={() => setQuality(preset)}>{preset}</button>)}</div></div><div className="setting-group"><label htmlFor="render-distance">Chunk distance <strong>{renderDistance} chunks</strong></label><input id="render-distance" type="range" min="1" max="5" step="1" value={renderDistance} onChange={(event) => setRenderDistance(Number(event.target.value))} /></div><p className="setting-help">The world now generates exactly to this chunk radius. Higher settings load substantially more 3D terrain.</p><div className="pause-actions"><button type="button" className="primary-button" onClick={resume}>APPLY & RETURN</button><button type="button" className="danger-button" onClick={resetWorld}>RESET WORLD</button></div></> : <><p className="eyebrow">FRONTIER PAUSED</p><h2>{activeWorld.name}</h2><p>Your position, inventory, and every block change are saved locally.</p><button type="button" className="primary-button" onClick={resume}>RESUME</button><button type="button" className="text-button" onClick={() => setInventoryOpen(true)}>INVENTORY</button><button type="button" className="text-button" onClick={() => setSettingsOpen(true)}>RENDER SETTINGS</button><button type="button" className="text-button" onClick={() => { setActiveWorld(null); setPaused(true); }}>SAVE & QUIT TO WORLDS</button></>}
           </div>
         </section>
       )}
+      {inventoryOpen && <section className="inventory-screen"><div className="inventory-panel"><p className="eyebrow">{activeWorld.mode.toUpperCase()} INVENTORY</p><h2>Explorer Pack</h2><div className="inventory-grid">{HOTBAR.map((item) => <button type="button" key={item.type} onClick={() => { setSelected(item.type); setInventoryOpen(false); setPaused(false); }}><ItemCube texture={item.texture} /><strong>{BLOCK_LABELS[item.type]}</strong><span>{activeWorld.mode === "creative" ? "Unlimited" : `${inventory[item.type] ?? 0} blocks`}</span></button>)}</div><button type="button" className="primary-button" onClick={() => { setInventoryOpen(false); setPaused(false); }}>CLOSE PACK</button></div></section>}
       {!mobile && !intro && !paused && !locked && <button type="button" className="capture-prompt" onClick={resume}>CLICK TO CONTROL</button>}
     </main>
   );
