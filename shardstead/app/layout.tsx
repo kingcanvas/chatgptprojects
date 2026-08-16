@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Shardstead — First Light",
+  title: "Shardstead — Riftfolk",
   description: "A playable 3D building and exploration prototype for desktop and mobile.",
   other: { "codex-preview": "development" },
   manifest: "/manifest.webmanifest",

@@ -83,6 +83,27 @@ function isTouchDevice() {
   return typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 }
 
+type GameViewport = { width: number; height: number };
+
+function syncGameViewport(): GameViewport {
+  const viewport = window.visualViewport;
+  const inner = { width: window.innerWidth, height: window.innerHeight };
+  const candidates = [
+    viewport ? { width: viewport.width, height: viewport.height } : null,
+    inner,
+    { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
+  ].filter((size): size is GameViewport => Boolean(size && size.width > 0 && size.height > 0));
+  const landscape = inner.width > inner.height || window.matchMedia("(orientation: landscape)").matches;
+  const size = candidates.find((candidate) => (candidate.width > candidate.height) === landscape) ?? inner;
+  const measured = { width: Math.max(1, Math.round(size.width)), height: Math.max(1, Math.round(size.height)) };
+  const root = document.documentElement;
+  root.style.setProperty("--game-width", `${measured.width}px`);
+  root.style.setProperty("--game-height", `${measured.height}px`);
+  root.dataset.gameOrientation = measured.width > measured.height ? "landscape" : "portrait";
+  root.dataset.gameTouch = String(isTouchDevice());
+  return measured;
+}
+
 function ItemCube({ texture }: { texture: string }) {
   return <span className="item-cube" style={{ "--texture": `url(${texture})` } as React.CSSProperties}>{["front", "back", "right", "left", "top", "bottom"].map((face) => <i key={face} className={face} />)}</span>;
 }
@@ -149,6 +170,43 @@ export default function ShardsteadGame() {
   const [bossStatus, setBossStatus] = useState<{ health: number; maxHealth: number } | null>(null);
   const [mobile] = useState(() => isTouchDevice());
   useEffect(() => { const timer = window.setTimeout(() => setWorlds(loadWorlds()), 0); return () => window.clearTimeout(timer); }, []);
+
+  useEffect(() => {
+    let frame = 0;
+    let timers: number[] = [];
+    const publishViewport = () => {
+      const detail = syncGameViewport();
+      window.dispatchEvent(new CustomEvent<GameViewport>("shardstead:viewport", { detail }));
+    };
+    const scheduleViewport = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+      frame = window.requestAnimationFrame(publishViewport);
+      timers = [80, 240, 650].map((delay) => window.setTimeout(publishViewport, delay));
+    };
+    const onVisibility = () => { if (!document.hidden) scheduleViewport(); };
+    publishViewport();
+    window.addEventListener("resize", scheduleViewport);
+    window.addEventListener("orientationchange", scheduleViewport);
+    window.addEventListener("pageshow", scheduleViewport);
+    window.addEventListener("focus", scheduleViewport);
+    window.visualViewport?.addEventListener("resize", scheduleViewport);
+    window.visualViewport?.addEventListener("scroll", scheduleViewport);
+    window.screen.orientation?.addEventListener?.("change", scheduleViewport);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener("resize", scheduleViewport);
+      window.removeEventListener("orientationchange", scheduleViewport);
+      window.removeEventListener("pageshow", scheduleViewport);
+      window.removeEventListener("focus", scheduleViewport);
+      window.visualViewport?.removeEventListener("resize", scheduleViewport);
+      window.visualViewport?.removeEventListener("scroll", scheduleViewport);
+      window.screen.orientation?.removeEventListener?.("change", scheduleViewport);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
@@ -737,16 +795,7 @@ export default function ShardsteadGame() {
     };
     applyGraphicsRef.current();
 
-    let resizeFrame = 0;
-    let orientationTimer = 0;
-    const applySize = () => {
-      resizeFrame = 0;
-      const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-      const viewport = standalone ? null : window.visualViewport;
-      const width = Math.max(1, Math.round(standalone ? document.documentElement.clientWidth : (viewport?.width ?? window.innerWidth)));
-      const height = Math.max(1, Math.round(standalone ? document.documentElement.clientHeight : (viewport?.height ?? window.innerHeight)));
-      document.documentElement.style.setProperty("--game-width", `${width}px`);
-      document.documentElement.style.setProperty("--game-height", `${height}px`);
+    const applySize = ({ width, height }: GameViewport = syncGameViewport()) => {
       mount.style.width = `${width}px`;
       mount.style.height = `${height}px`;
       canvas.style.width = `${width}px`;
@@ -756,16 +805,20 @@ export default function ShardsteadGame() {
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
     };
-    const resize = () => {
-      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
-      resizeFrame = window.requestAnimationFrame(applySize);
+    const onViewport = (event: Event) => {
+      const detail = (event as CustomEvent<GameViewport>).detail;
+      applySize(detail ?? syncGameViewport());
+      moveInputRef.current = { x: 0, y: 0 };
+      stopMining();
+      const pad = document.querySelector<HTMLElement>(".move-pad");
+      pad?.style.setProperty("--stick-x", "0px");
+      pad?.style.setProperty("--stick-y", "0px");
     };
-    const orientationChange = () => {
-      resize();
-      window.clearTimeout(orientationTimer);
-      orientationTimer = window.setTimeout(resize, 220);
+    const preventTouchPageMove = (event: TouchEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".inventory-screen,.pause-screen,.entry-screen,.dialogue-screen,.home-screen")) return;
+      event.preventDefault();
     };
-    const preventTouchPageMove = (event: TouchEvent) => event.preventDefault();
     const onKeyDown = (event: KeyboardEvent) => {
       if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "Space"].includes(event.code)) keys.add(event.code);
       if (event.code === "Space") { event.preventDefault(); jump(); }
@@ -775,7 +828,9 @@ export default function ShardsteadGame() {
         if (HOTBAR[slot]) setSelected(HOTBAR[slot].type);
       }
       if (event.code === "Escape") { setPaused(true); setSettingsOpen(false); }
-      if (event.code === "KeyE") { setInventoryOpen((open) => !open); setPaused(true); }
+      if (event.code === "KeyE") {
+        setInventoryOpen((open) => { setPaused(!open); return !open; });
+      }
     };
     const onKeyUp = (event: KeyboardEvent) => keys.delete(event.code);
     const onMouseMove = (event: MouseEvent) => {
@@ -800,10 +855,7 @@ export default function ShardsteadGame() {
     };
     const onVisibility = () => { if (document.hidden) { stopMining(); saveWorld(); } };
 
-    window.addEventListener("resize", resize);
-    window.addEventListener("orientationchange", orientationChange);
-    window.visualViewport?.addEventListener("resize", resize);
-    window.visualViewport?.addEventListener("scroll", resize);
+    window.addEventListener("shardstead:viewport", onViewport);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     document.addEventListener("mousemove", onMouseMove);
@@ -1083,13 +1135,8 @@ export default function ShardsteadGame() {
 
     return () => {
       window.cancelAnimationFrame(frame);
-      if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
-      window.clearTimeout(orientationTimer);
       saveWorld();
-      window.removeEventListener("resize", resize);
-      window.removeEventListener("orientationchange", orientationChange);
-      window.visualViewport?.removeEventListener("resize", resize);
-      window.visualViewport?.removeEventListener("scroll", resize);
+      window.removeEventListener("shardstead:viewport", onViewport);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       document.removeEventListener("mousemove", onMouseMove);
@@ -1169,7 +1216,7 @@ export default function ShardsteadGame() {
   if (!activeWorld) return (
     <main className="home-screen">
       <section className="home-panel">
-        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 006 · RIFTFOLK</p><h1>SHARDSTEAD</h1>
+        <div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">BUILD 007 · TRUEFRAME</p><h1>SHARDSTEAD</h1>
         <p className="tagline">Choose a world. Keep every frontier.</p>
         {creating ? <div className="world-creator">
           <label>World name<input value={newWorldName} maxLength={30} onChange={(e) => setNewWorldName(e.target.value)} /></label>
@@ -1205,7 +1252,7 @@ export default function ShardsteadGame() {
       {activeWorld.mode === "survival" && <div className="survival-hud" aria-label={`Health ${health} of 20, food ${food} of 20`}><div className="vital-row health-row">{Array.from({ length: 10 }, (_, index) => <i key={index} className={health > index * 2 ? "filled" : ""}>♥</i>)}</div><div className="vital-row food-row">{Array.from({ length: 10 }, (_, index) => <i key={index} className={food > index * 2 ? "filled" : ""}>◆</i>)}</div></div>}
       {bossStatus && <div className="boss-hud" aria-label={`Rift Warden health ${bossStatus.health} of ${bossStatus.maxHealth}`}><strong>RIFT WARDEN</strong><span><i style={{ width: `${(bossStatus.health / bossStatus.maxHealth) * 100}%` }} /></span><small>{bossStatus.health} / {bossStatus.maxHealth}</small></div>}
       {!intro && !paused && <div className="status-toast" aria-live="polite">{message}</div>}
-      <button type="button" className="inventory-toggle" onPointerDown={(event) => { stopTouch(event); setInventoryOpen(true); setPaused(true); }} aria-label="Open inventory">•••</button>
+      <button type="button" className="inventory-toggle" onPointerDown={(event) => { stopTouch(event); setInventoryOpen(true); setPaused(true); }} aria-label="Open inventory">INV</button>
       <nav className="hotbar" aria-label="Building materials">
         {HOTBAR.map((item, index) => (
           <button
@@ -1238,7 +1285,7 @@ export default function ShardsteadGame() {
       {intro && (
         <section className="entry-screen" aria-labelledby="game-title">
           <div className="entry-panel"><div className="core-mark" aria-hidden="true"><span /></div><p className="eyebrow">{activeWorld.mode.toUpperCase()} WORLD</p><h1 id="game-title">{activeWorld.name}</h1><p className="tagline">The frontier grows with every step.</p><p className="entry-copy">Regional oceans, endless chunk streaming, structures, creatures, mining, building, and device-local saves.</p><button type="button" className="primary-button" onClick={begin}>ENTER WORLD</button><span className="input-note">{mobile ? "Touch controls enabled · rotate any time" : "Keyboard + mouse · Click to capture cursor"}</span></div>
-          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 006</div>
+          <div className="version-stamp">ORIGINAL PROTOTYPE · BUILD 007</div>
         </section>
       )}
       {!intro && paused && (

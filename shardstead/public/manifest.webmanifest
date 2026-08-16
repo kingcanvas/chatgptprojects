@@ -1,0 +1,19 @@
+{
+  "name": "Shardstead",
+  "short_name": "Shardstead",
+  "description": "An original infinite 3D building and exploration game.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#08100f",
+  "theme_color": "#08100f",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
